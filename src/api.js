@@ -50,7 +50,6 @@ export async function generateDish(preferences) {
     if (!res.ok) {
       const errorText = await res.text();
       console.error('API: Generate dish error response:', errorText);
-      console.error('API: Response status:', res.status, res.statusText);
       throw new Error(`Failed to generate dish: ${res.status} ${res.statusText}`);
     }
     
