@@ -250,7 +250,7 @@ export default function DishScreen() {
                     onPress={handleShareRecipe}
                     activeOpacity={0.7}
                   >
-                    <FontAwesome name="share" size={16} color="#67756a" />
+                    <FontAwesome name="share" size={16} color="#5b6e61" />
                   </TouchableOpacity>
                   <TouchableOpacity 
                     style={styles.startFreshButton} 

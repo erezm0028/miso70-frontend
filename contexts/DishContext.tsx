@@ -4,6 +4,7 @@ import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../src/firebase';
 import { useAuth } from './AuthContext';
 import NetInfo from '@react-native-community/netinfo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Dish = {
   id: string;
@@ -79,6 +80,7 @@ type DishContextType = {
   updatePreferences: (newPreferences: Partial<Preferences>) => void;
   saveDishToHistory: (dish: Dish) => void;
   saveDishHistoryToFirestore: (history: Dish[]) => Promise<void>;
+  saveCurrentDishHistoryToLocalStorage: () => Promise<void>;
   loadDishFromHistory: (dishId: string) => void;
   generateRecipeInfo: (dishTitle: string) => Promise<void>;
   modifyRecipe: (modification: string, dishToModify?: any) => Promise<{ isTransformative: boolean; summary: string; updatedDish: any } | void>;
@@ -126,6 +128,7 @@ const DishContext = createContext<DishContextType>({
   updatePreferences: () => {},
   saveDishToHistory: () => {},
   saveDishHistoryToFirestore: async () => {},
+  saveCurrentDishHistoryToLocalStorage: async () => {},
   loadDishFromHistory: () => {},
   generateRecipeInfo: async () => {},
   modifyRecipe: async () => {},
@@ -148,9 +151,14 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
   
   // Check network connectivity
   const checkNetworkStatus = async () => {
-    const state = await NetInfo.fetch();
-    console.log('Network status:', state.isConnected);
-    return state.isConnected;
+    try {
+      const state = await NetInfo.fetch();
+      console.log('Network status:', state.isConnected);
+      return state.isConnected;
+    } catch (error) {
+      console.log('Error checking network status:', error);
+      return false;
+    }
   };
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [conversationContext, setConversationContext] = useState<ConversationContext>({
@@ -739,8 +747,48 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const newHistory = [dish, ...prev];
       // Save to Firestore in background
       saveDishHistoryToFirestore(newHistory);
+      // Also save to local storage as backup
+      saveDishHistoryToLocalStorage(newHistory);
       return newHistory;
     });
+  };
+
+  // Save dish history to local storage as backup
+  const saveDishHistoryToLocalStorage = async (history: Dish[]) => {
+    try {
+      const historyData = history.map(dish => ({
+        ...dish,
+        timestamp: dish.timestamp.toISOString() // Convert Date to string for storage
+      }));
+      await AsyncStorage.setItem('dishHistory', JSON.stringify(historyData));
+      console.log('Saved dish history to local storage');
+    } catch (error) {
+      console.log('Error saving to local storage:', error);
+    }
+  };
+
+  // Public function to save current dish history to local storage
+  const saveCurrentDishHistoryToLocalStorage = async () => {
+    await saveDishHistoryToLocalStorage(dishHistory);
+  };
+
+  // Load dish history from local storage
+  const loadDishHistoryFromLocalStorage = async () => {
+    try {
+      const stored = await AsyncStorage.getItem('dishHistory');
+      if (stored) {
+        const historyData = JSON.parse(stored);
+        const history = historyData.map((dish: any) => ({
+          ...dish,
+          timestamp: new Date(dish.timestamp) // Convert string back to Date
+        }));
+        console.log('Loaded dish history from local storage:', history.length, 'dishes');
+        return history;
+      }
+    } catch (error) {
+      console.log('Error loading from local storage:', error);
+    }
+    return [];
   };
 
   // Save dish history to Firestore
@@ -787,6 +835,7 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     
     console.log('Loading dish history from Firestore for user:', user.uid);
+    console.log('User object:', { uid: user.uid, email: user.email });
     setIsLoadingHistory(true);
     
     try {
@@ -800,7 +849,7 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Add timeout to prevent long waits
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Firestore timeout')), 5000)
+        setTimeout(() => reject(new Error('Firestore timeout')), 10000)
       );
       
       const fetchPromise = getDoc(doc(db, 'users', user.uid));
@@ -820,18 +869,38 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setDishHistory(history);
         } else {
           console.log('No dish history found in user document');
+          setDishHistory([]); // Explicitly set empty array
         }
       } else {
         console.log('User document does not exist');
+        setDishHistory([]); // Explicitly set empty array
       }
       
       // Only set loading to false if we successfully completed the operation
       setIsLoadingHistory(false);
     } catch (error) {
-      console.log('Error loading dish history (this is normal if offline):', error.message);
-      // Don't throw error, just continue with empty history
-      // Keep loading state true so user sees loading indicator
-      // The loading state will be cleared when user changes or after a delay
+      console.log('Error loading dish history from Firestore (this is normal if offline):', error.message);
+      console.log('Full error object:', error);
+      console.log('Error stack:', error.stack);
+      
+      // Try to load from local storage as fallback
+      console.log('Trying to load from local storage as fallback...');
+      try {
+        const localHistory = await loadDishHistoryFromLocalStorage();
+        if (localHistory.length > 0) {
+          console.log('Successfully loaded dish history from local storage');
+          setDishHistory(localHistory);
+        } else {
+          console.log('No dish history found in local storage either');
+          setDishHistory([]);
+        }
+      } catch (localError) {
+        console.log('Error loading from local storage:', localError);
+        setDishHistory([]);
+      }
+      
+      // Set loading to false so user doesn't see endless loading
+      setIsLoadingHistory(false);
     }
   };
 
@@ -1084,6 +1153,7 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatePreferences,
       saveDishToHistory,
       saveDishHistoryToFirestore,
+      saveCurrentDishHistoryToLocalStorage,
       loadDishFromHistory,
       generateRecipeInfo,
       modifyRecipe,

@@ -105,13 +105,13 @@ const dietOptions = [
 // Plate style options
 const plateStyleOptions = [
   'Comfort Plate',
-  'Stir Fry Plate',
+  'Stir Fry / Noodles',
   'Salad Bowl',
-  'Bento Box',
-  'Wrap',
+  'Side Dish',
+  'Wrap / Taco',
   'Soup / Stew',
   'Sandwich / Toast',
-  'Finger Food',
+  'Dessert',
 ];
 
 // Cuisines and classic dishes
@@ -179,7 +179,15 @@ const cuisineData = [
 ];
 
 export default function PreferencesScreen() {
-  const { preferences, updatePreferences, generateDish, currentDish, modifyRecipe } = useDish();
+  const { 
+    preferences, 
+    updatePreferences, 
+    generateDish, 
+    currentDish, 
+    modifyRecipe, 
+    updateChatContextForModifiedDish,
+    conversationContext
+  } = useDish();
   const navigation = useNavigation();
   const [error, setError] = useState(null);
   const [expandedCuisine, setExpandedCuisine] = useState<string | null>(null);
@@ -204,6 +212,24 @@ export default function PreferencesScreen() {
   // Check if there's a current dish loaded
   const hasCurrentDish = currentDish !== null;
 
+  // Sync local state with global preferences when component mounts or preferences change
+  useEffect(() => {
+    console.log('Syncing local state with global preferences:', preferences);
+    setSelectedDietaryRestrictions(preferences.dietaryRestrictions || []);
+    setSelectedCuisines(preferences.cuisines || []);
+    setSelectedPlateStyles(preferences.plateStyles || []);
+    
+    // Handle classic dishes - they're stored as a flat array in global state
+    // but as an object in local state, so we need to reconstruct the object
+    const classicDishesObject: { [cuisine: string]: string[] } = {};
+    if (preferences.classicDishes && preferences.classicDishes.length > 0) {
+      // This is a simplified approach - in a real app you'd want to maintain the cuisine mapping
+      // For now, we'll put all classic dishes under a general category
+      classicDishesObject['General'] = preferences.classicDishes;
+    }
+    setSelectedDishes(classicDishesObject);
+  }, [preferences]); // Run when preferences change (including when cleared by Start Fresh)
+
   const handlePlateStyleToggle = (plateStyle: string) => {
     // Single selection logic - only one plate style can be selected at a time
     let newPlateStyles: string[];
@@ -215,6 +241,15 @@ export default function PreferencesScreen() {
       newPlateStyles = [plateStyle];
     }
     setSelectedPlateStyles(newPlateStyles);
+    
+    // Update global preferences immediately
+    const newPreferences = {
+      dietaryRestrictions: selectedDietaryRestrictions,
+      cuisines: selectedCuisines,
+      classicDishes: Object.values(selectedDishes).flat(),
+      plateStyles: newPlateStyles
+    };
+    updatePreferences(newPreferences);
   };
 
   const handleApplyAllChanges = () => {
@@ -262,6 +297,10 @@ export default function PreferencesScreen() {
   const handleConfirmPreferences = async (action: 'modify' | 'new') => {
     console.log('handleConfirmPreferences called with action:', action);
     console.log('pendingPreferences:', pendingPreferences);
+    console.log('selectedDietaryRestrictions:', selectedDietaryRestrictions);
+    console.log('selectedCuisines:', selectedCuisines);
+    console.log('selectedPlateStyles:', selectedPlateStyles);
+    console.log('selectedDishes:', selectedDishes);
     if (pendingPreferences) {
       setLoading(true);
       
@@ -275,9 +314,35 @@ export default function PreferencesScreen() {
           plateStyles: selectedPlateStyles
         };
 
+        // Create enhanced preferences that include conversation context
+        const enhancedPreferences = {
+          ...newPreferences,
+          // Add wanted ingredients from conversation context
+          wantedIngredients: conversationContext.preferences
+            .filter(p => p.type === 'ingredient')
+            .map(p => p.value),
+          // Add style preferences from conversation context
+          wantedStyles: conversationContext.preferences
+            .filter(p => p.type === 'style')
+            .map(p => p.value),
+          // Add dish type preferences from conversation context
+          wantedDishTypes: conversationContext.preferences
+            .filter(p => p.type === 'dishType')
+            .map(p => p.value),
+          // Add classic dish references from conversation context
+          wantedClassicDishes: conversationContext.preferences
+            .filter(p => p.type === 'classicDish')
+            .map(p => p.value),
+          // Add dietary preferences from conversation context
+          wantedDietary: conversationContext.preferences
+            .filter(p => p.type === 'dietary')
+            .map(p => p.value)
+        };
+
         console.log('Selected cuisines (inspiration):', selectedCuisines);
         console.log('Selected specific dishes (fusion base):', selectedSpecificDishes);
-        console.log('Applying preferences:', newPreferences);
+        console.log('Applying enhanced preferences:', enhancedPreferences);
+        console.log('Conversation context preferences:', conversationContext.preferences);
 
         setShowConfirmation(false);
         setPendingPreferences(null);
@@ -286,20 +351,20 @@ export default function PreferencesScreen() {
           // For modification, directly modify the existing dish without generating a new one first
           let modificationPrompt = `Transform this dish to incorporate: `;
           
-          if (newPreferences.cuisines.length > 0) {
-            modificationPrompt += `${newPreferences.cuisines.join(' and ')} cuisine elements. `;
+          if (enhancedPreferences.cuisines.length > 0) {
+            modificationPrompt += `${enhancedPreferences.cuisines.join(' and ')} cuisine elements. `;
           }
           
-          if (newPreferences.classicDishes.length > 0) {
-            modificationPrompt += `Incorporate elements from: ${newPreferences.classicDishes.join(', ')}. `;
+          if (enhancedPreferences.classicDishes.length > 0) {
+            modificationPrompt += `Incorporate elements from: ${enhancedPreferences.classicDishes.join(', ')}. `;
           }
           
-          if (newPreferences.dietaryRestrictions.length > 0) {
-            modificationPrompt += `Make it ${newPreferences.dietaryRestrictions.join(' and ').toLowerCase()}. `;
+          if (enhancedPreferences.dietaryRestrictions.length > 0) {
+            modificationPrompt += `Make it ${enhancedPreferences.dietaryRestrictions.join(' and ').toLowerCase()}. `;
           }
           
-          if (newPreferences.plateStyles.length > 0) {
-            modificationPrompt += `Adapt it to a ${newPreferences.plateStyles.join(' and ')} style. `;
+          if (enhancedPreferences.plateStyles.length > 0) {
+            modificationPrompt += `Adapt it to a ${enhancedPreferences.plateStyles.join(' and ')} style. `;
           }
           
           modificationPrompt += `Keep the core concept of "${currentDish.title}" but adapt it to these new requirements.`;
@@ -307,19 +372,46 @@ export default function PreferencesScreen() {
           console.log('Modification prompt:', modificationPrompt);
           
           try {
-            await modifyRecipe(modificationPrompt);
+            // Update the global preferences first
+            console.log('Calling updatePreferences with:', enhancedPreferences);
+            console.log('About to call updatePreferences function (modify path)...');
+            updatePreferences(enhancedPreferences);
+            console.log('updatePreferences function called successfully (modify path)');
+            
+            // Modify the recipe and get the result
+            const modificationResult = await modifyRecipe(modificationPrompt, currentDish);
+            
+            // Update chat context with the modification
+            if (modificationResult && modificationResult.updatedDish) {
+              updateChatContextForModifiedDish(modificationResult.updatedDish, modificationResult.summary);
+            }
+            
             navigation.navigate('Recipe' as never);
           } catch (error) {
             console.error('Error modifying recipe:', error);
             // Fallback to generating new dish if modification fails
-            await generateDish(newPreferences);
+            console.log('Calling updatePreferences with:', enhancedPreferences);
+            console.log('About to call updatePreferences function (fallback path)...');
+            updatePreferences(enhancedPreferences);
+            console.log('updatePreferences function called successfully (fallback path)');
+            await generateDish(enhancedPreferences);
             navigation.navigate('Recipe' as never);
           }
         } else {
           // For new dish, generate and navigate to Dish screen
-          console.log('About to call generateDish with:', newPreferences);
+          console.log('About to call generateDish with:', enhancedPreferences);
+          
+          // Update the global preferences first
+          console.log('Calling updatePreferences with:', enhancedPreferences);
+          console.log('About to call updatePreferences function...');
+          updatePreferences(enhancedPreferences);
+          console.log('updatePreferences function called successfully');
+          
+          // Small delay to ensure preferences are updated
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
           const startTime = Date.now();
-          await generateDish(newPreferences);
+          await generateDish(enhancedPreferences);
           const elapsed = Date.now() - startTime;
           const minLoadingTime = 1000; // 1 second minimum
           
@@ -359,6 +451,15 @@ export default function PreferencesScreen() {
       // Don't auto-select all dishes when checking cuisine - let user choose specific ones
     }
     setSelectedCuisines(newCuisines);
+    
+    // Update global preferences immediately
+    const newPreferences = {
+      dietaryRestrictions: selectedDietaryRestrictions,
+      cuisines: newCuisines,
+      classicDishes: Object.values(selectedDishes).flat(),
+      plateStyles: selectedPlateStyles
+    };
+    updatePreferences(newPreferences);
   };
 
   const handleDishCheck = (cuisine: string, dish: string, dishes: string[]) => {
@@ -374,36 +475,24 @@ export default function PreferencesScreen() {
     setSelectedDishes(newSelectedDishes);
     
     // Keep cuisine selected even if not all dishes are selected
+    let newCuisines = selectedCuisines;
     if (!selectedCuisines.includes(cuisine)) {
-      const newCuisines = [...selectedCuisines, cuisine];
+      newCuisines = [...selectedCuisines, cuisine];
       setSelectedCuisines(newCuisines);
     }
+    
+    // Update global preferences immediately
+    const newPreferences = {
+      dietaryRestrictions: selectedDietaryRestrictions,
+      cuisines: newCuisines,
+      classicDishes: Object.values(newSelectedDishes).flat(),
+      plateStyles: selectedPlateStyles
+    };
+    updatePreferences(newPreferences);
   };
 
-  // Initialize selected states from current preferences
-  useEffect(() => {
-    setSelectedCuisines(preferences.cuisines);
-    setSelectedPlateStyles(preferences.plateStyles);
-    setSelectedDietaryRestrictions(preferences.dietaryRestrictions);
-    
-    // For classic dishes, we need to reconstruct the mapping
-    const dishMapping: { [cuisine: string]: string[] } = {};
-    
-    // Restore classic dishes from preferences
-    if (preferences.classicDishes.length > 0) {
-      // Group classic dishes by cuisine (this is a simplified approach)
-      // In a real app, you might want to store the cuisine-dish mapping
-      preferences.classicDishes.forEach(dish => {
-        // For now, we'll put all dishes in a general category
-        if (!dishMapping['General']) {
-          dishMapping['General'] = [];
-        }
-        dishMapping['General'].push(dish);
-      });
-    }
-    
-    setSelectedDishes(dishMapping);
-  }, [preferences]);
+  // This useEffect is now redundant since we handle initialization in the mount useEffect above
+  // Removing it to prevent conflicts
 
   // Add a generic error state and display the friendly message if needed
   if (error) {
@@ -472,6 +561,15 @@ export default function PreferencesScreen() {
               ? currentDiets.filter(d => d !== diet)
               : [...currentDiets, diet];
             setSelectedDietaryRestrictions(newDiets);
+            
+            // Update global preferences immediately
+            const newPreferences = {
+              dietaryRestrictions: newDiets,
+              cuisines: selectedCuisines,
+              classicDishes: Object.values(selectedDishes).flat(),
+              plateStyles: selectedPlateStyles
+            };
+            updatePreferences(newPreferences);
           }}
           style={{ marginBottom: 24 }}
         />

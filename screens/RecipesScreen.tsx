@@ -8,9 +8,8 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useDish } from '../contexts/DishContext';
 import { FontAwesome } from '@expo/vector-icons';
-import { FontAwesome6 } from '@expo/vector-icons';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { getRecipeInfo, generateShareUrl, copyToClipboard } from '../src/api';
+import { getRecipeInfo, generateShareText } from '../src/api';
+import { Share } from 'react-native';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorScreen from '../components/ErrorScreen';
 
@@ -151,28 +150,18 @@ export default function RecipesScreen() {
     if (!currentDish) return;
     
     try {
-      const shareUrl = generateShareUrl(currentDish);
-      if (shareUrl) {
-        const success = await copyToClipboard(shareUrl);
-        if (success) {
-          Alert.alert(
-            'Recipe Copied!',
-            'The recipe has been copied to your clipboard. You can now paste it anywhere!',
-            [{ text: 'OK' }]
-          );
-        } else {
-          Alert.alert(
-            'Copy Failed',
-            'Unable to copy to clipboard. Please try again.',
-            [{ text: 'OK' }]
-          );
-        }
+      const shareText = generateShareText(currentDish);
+      if (shareText) {
+        await Share.share({
+          message: shareText,
+          title: currentDish.title
+        });
       }
     } catch (error) {
       console.error('Error sharing recipe:', error);
       Alert.alert(
-        'Copy Failed',
-        'Unable to generate recipe text. Please try again.',
+        'Share Failed',
+        'Unable to share recipe. Please try again.',
         [{ text: 'OK' }]
       );
     }
@@ -224,12 +213,7 @@ export default function RecipesScreen() {
         <Header />
         <View style={styles.emptyState}>
           <View style={styles.iconCircle}>
-            {/* Use FontAwesome6 bowl-food if available, else utensils */}
-            {FontAwesome6 ? (
-              <FontAwesome6 name="bowl-food" size={56} color="#67756a" />
-            ) : (
-              <FontAwesome5 name="utensils" size={56} color="#67756a" />
-            )}
+            <FontAwesome5 name="utensils" size={56} color="#67756a" />
           </View>
           <CustomText style={styles.emptyTitle}>No Recipes Yet</CustomText>
           <CustomText style={styles.emptySubtitle}>
@@ -246,188 +230,134 @@ export default function RecipesScreen() {
     );
   }
 
-  // Enhanced getIngredientIcon with better icon library selection
+  // Dynamic food icon selection based on ingredient keywords
   const getIngredientIcon = (ingredientName: string) => {
     const name = ingredientName.toLowerCase();
     
-    // Proteins - using MaterialCommunityIcons for better food icons
-    if (name.includes('chicken')) return { icon: 'food-drumstick', library: 'MaterialCommunityIcons' };
-    if (name.includes('beef') || name.includes('steak') || name.includes('meat')) return { icon: 'food-steak', library: 'MaterialCommunityIcons' };
-    if (name.includes('pork') || name.includes('bacon') || name.includes('ham')) return { icon: 'food-bacon', library: 'MaterialCommunityIcons' };
-    if (name.includes('fish') || name.includes('salmon') || name.includes('tuna')) return { icon: 'fish', library: 'FontAwesome5' };
-    if (name.includes('shrimp') || name.includes('prawn')) return { icon: 'fish', library: 'FontAwesome5' };
-    if (name.includes('egg')) return { icon: 'egg', library: 'FontAwesome5' };
-    if (name.includes('tofu')) return { icon: 'cube', library: 'FontAwesome5' };
-    if (name.includes('tempeh')) return { icon: 'cube', library: 'FontAwesome5' };
-    if (name.includes('lamb')) return { icon: 'food-steak', library: 'MaterialCommunityIcons' };
-    if (name.includes('turkey')) return { icon: 'food-drumstick', library: 'MaterialCommunityIcons' };
-    if (name.includes('duck')) return { icon: 'food-drumstick', library: 'MaterialCommunityIcons' };
-    if (name.includes('seafood')) return { icon: 'fish', library: 'FontAwesome5' };
-    if (name.includes('crab')) return { icon: 'fish', library: 'FontAwesome5' };
-    if (name.includes('lobster')) return { icon: 'fish', library: 'FontAwesome5' };
-    if (name.includes('clam') || name.includes('mussel') || name.includes('oyster')) return { icon: 'fish', library: 'FontAwesome5' };
+    // Define keyword-to-icon mappings for common ingredient types
+    const iconMappings = {
+      // Fruits
+      'apple': 'apple-alt',
+      'banana': 'apple-alt',
+      'orange': 'lemon',
+      'lemon': 'lemon',
+      'lime': 'lemon',
+      'mango': 'apple-alt',
+      'strawberry': 'apple-alt',
+      'berry': 'apple-alt',
+      'grape': 'apple-alt',
+      'peach': 'apple-alt',
+      'pear': 'apple-alt',
+      
+      // Vegetables
+      'carrot': 'carrot',
+      'onion': 'carrot',
+      'garlic': 'carrot',
+      'tomato': 'carrot',
+      'potato': 'carrot',
+      'bell': 'carrot',
+      'cucumber': 'carrot',
+      'lettuce': 'leaf',
+      'spinach': 'leaf',
+      'kale': 'leaf',
+      'cabbage': 'leaf',
+      'broccoli': 'seedling',
+      'cauliflower': 'seedling',
+      'mushroom': 'seedling',
+      
+      // Proteins
+      'chicken': 'drumstick-bite',
+      'turkey': 'drumstick-bite',
+      'beef': 'drumstick-bite',
+      'pork': 'drumstick-bite',
+      'lamb': 'drumstick-bite',
+      'fish': 'fish',
+      'salmon': 'fish',
+      'tuna': 'fish',
+      'shrimp': 'fish',
+      'egg': 'egg',
+      'tofu': 'egg',
+      
+      // Dairy
+      'milk': 'wine-bottle',
+      'cheese': 'cheese',
+      'yogurt': 'cheese',
+      'butter': 'cheese',
+      
+      // Grains
+      'bread': 'bread-slice',
+      'rice': 'bread-slice',
+      'pasta': 'bread-slice',
+      'flour': 'bread-slice',
+      'oat': 'bread-slice',
+      'wheat': 'bread-slice',
+      
+      // Spices & Herbs
+      'salt': 'pepper-hot',
+      'pepper': 'pepper-hot',
+      'chili': 'pepper-hot',
+      'spice': 'pepper-hot',
+      'herb': 'leaf',
+      'basil': 'leaf',
+      'oregano': 'leaf',
+      'thyme': 'leaf',
+      'rosemary': 'leaf',
+      
+      // Oils & Liquids
+      'oil': 'wine-bottle',
+      'vinegar': 'wine-bottle',
+      'sauce': 'wine-bottle',
+      'soy': 'wine-bottle',
+      'water': 'wine-bottle',
+      
+      // Nuts & Seeds
+      'nut': 'seedling',
+      'almond': 'seedling',
+      'walnut': 'seedling',
+      'seed': 'seedling',
+      'sesame': 'seedling',
+      
+      // Sweeteners
+      'sugar': 'candy-cane',
+      'honey': 'candy-cane',
+      'syrup': 'candy-cane',
+      'chocolate': 'candy-cane',
+      
+      // Beverages
+      'wine': 'wine-bottle',
+      'beer': 'wine-bottle',
+      'juice': 'wine-bottle',
+      'tea': 'mug-hot',
+      'coffee': 'mug-hot',
+      
+      // Generic food items
+      'soup': 'utensils',
+      'salad': 'utensils',
+      'sandwich': 'hamburger',
+      'burger': 'hamburger',
+      'pizza': 'pizza-slice',
+      'cake': 'birthday-cake',
+      'cookie': 'cookie-bite',
+      'ice': 'ice-cream'
+    };
     
-    // Vegetables - using MaterialCommunityIcons for better veggie icons
-    if (name.includes('tomato') || name.includes('tomatoes')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('onion') || name.includes('onions')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('garlic')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('carrot') || name.includes('carrots')) return { icon: 'carrot', library: 'FontAwesome5' };
-    if (name.includes('pepper') || name.includes('bell pepper') || name.includes('chili')) return { icon: 'pepper-hot', library: 'FontAwesome5' };
-    if (name.includes('mushroom') || name.includes('mushrooms')) return { icon: 'mushroom', library: 'FontAwesome5' };
-    if (name.includes('lettuce') || name.includes('salad') || name.includes('greens')) return { icon: 'leaf', library: 'FontAwesome5' };
-    if (name.includes('spinach') || name.includes('kale')) return { icon: 'leaf', library: 'FontAwesome5' };
-    if (name.includes('broccoli') || name.includes('cauliflower')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('potato') || name.includes('potatoes')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('sweet potato') || name.includes('yam')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('avocado')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('cucumber')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('zucchini') || name.includes('squash')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('eggplant') || name.includes('aubergine')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('corn')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('pea') || name.includes('peas')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('bean') || name.includes('beans')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('lentil') || name.includes('lentils')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('asparagus')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('artichoke')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('brussels sprout') || name.includes('brussels sprouts')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('cabbage')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('celery')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('radish')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('turnip')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('beet') || name.includes('beets')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('parsnip')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('rutabaga')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('leek') || name.includes('leeks')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('shallot') || name.includes('shallots')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('scallion') || name.includes('scallions') || name.includes('green onion')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
+    // Search for matching keywords in the ingredient name
+    for (const [keyword, icon] of Object.entries(iconMappings)) {
+      if (name.includes(keyword)) {
+        return icon;
+      }
+    }
     
-    // Herbs and Spices
-    if (name.includes('basil') || name.includes('oregano') || name.includes('thyme') || name.includes('rosemary')) return { icon: 'leaf', library: 'FontAwesome5' };
-    if (name.includes('cilantro') || name.includes('coriander') || name.includes('parsley')) return { icon: 'leaf', library: 'FontAwesome5' };
-    if (name.includes('mint')) return { icon: 'leaf', library: 'FontAwesome5' };
-    if (name.includes('ginger')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('turmeric')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('cinnamon')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('nutmeg')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('paprika')) return { icon: 'pepper-hot', library: 'FontAwesome5' };
-    if (name.includes('cumin')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    
-    // Fruits
-    if (name.includes('apple')) return { icon: 'apple-alt', library: 'FontAwesome5' };
-    if (name.includes('banana')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('orange')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('lemon')) return { icon: 'lemon', library: 'FontAwesome5' };
-    if (name.includes('lime')) return { icon: 'lemon', library: 'FontAwesome5' };
-    if (name.includes('pineapple')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('mango')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('strawberry') || name.includes('berries')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('grape')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('peach')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('pear')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('plum')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('cherry')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('blueberry')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('raspberry')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    if (name.includes('blackberry')) return { icon: 'food-apple', library: 'MaterialCommunityIcons' };
-    
-    // Grains and Starches
-    if (name.includes('rice')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('pasta') || name.includes('noodle') || name.includes('spaghetti')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('bread')) return { icon: 'bread-slice', library: 'FontAwesome5' };
-    if (name.includes('tortilla') || name.includes('wrap')) return { icon: 'bread-slice', library: 'FontAwesome5' };
-    if (name.includes('quinoa')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('oat') || name.includes('oats')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('flour')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    
-    // Dairy and Alternatives
-    if (name.includes('cheese')) return { icon: 'cheese', library: 'FontAwesome5' };
-    if (name.includes('milk')) return { icon: 'cup-water', library: 'MaterialCommunityIcons' };
-    if (name.includes('cream')) return { icon: 'cup-water', library: 'MaterialCommunityIcons' };
-    if (name.includes('yogurt') || name.includes('yoghurt')) return { icon: 'cup-water', library: 'MaterialCommunityIcons' };
-    if (name.includes('butter')) return { icon: 'cheese', library: 'FontAwesome5' };
-    if (name.includes('sour cream')) return { icon: 'cup-water', library: 'MaterialCommunityIcons' };
-    if (name.includes('cream cheese')) return { icon: 'cheese', library: 'FontAwesome5' };
-    if (name.includes('parmesan') || name.includes('cheddar') || name.includes('mozzarella')) return { icon: 'cheese', library: 'FontAwesome5' };
-    
-    // Oils and Fats
-    if (name.includes('olive oil')) return { icon: 'tint', library: 'FontAwesome5' };
-    if (name.includes('vegetable oil') || name.includes('canola oil')) return { icon: 'tint', library: 'FontAwesome5' };
-    if (name.includes('coconut oil')) return { icon: 'tint', library: 'FontAwesome5' };
-    if (name.includes('sesame oil')) return { icon: 'tint', library: 'FontAwesome5' };
-    if (name.includes('oil')) return { icon: 'tint', library: 'FontAwesome5' };
-    
-    // Condiments and Sauces
-    if (name.includes('soy sauce') || name.includes('tamari')) return { icon: 'bottle-wine', library: 'MaterialCommunityIcons' };
-    if (name.includes('vinegar')) return { icon: 'bottle-wine', library: 'MaterialCommunityIcons' };
-    if (name.includes('hot sauce') || name.includes('sriracha')) return { icon: 'pepper-hot', library: 'FontAwesome5' };
-    if (name.includes('ketchup')) return { icon: 'bottle-wine', library: 'MaterialCommunityIcons' };
-    if (name.includes('mustard')) return { icon: 'bottle-wine', library: 'MaterialCommunityIcons' };
-    if (name.includes('mayonnaise') || name.includes('mayo')) return { icon: 'bottle-wine', library: 'MaterialCommunityIcons' };
-    if (name.includes('sauce')) return { icon: 'bottle-wine', library: 'MaterialCommunityIcons' };
-    if (name.includes('dressing')) return { icon: 'bottle-wine', library: 'MaterialCommunityIcons' };
-    
-    // Sweeteners
-    if (name.includes('sugar')) return { icon: 'cube', library: 'FontAwesome5' };
-    if (name.includes('honey')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('maple syrup')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('agave')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('stevia')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    
-    // Seasonings
-    if (name.includes('salt')) return { icon: 'cube', library: 'FontAwesome5' };
-    if (name.includes('pepper')) return { icon: 'pepper-hot', library: 'FontAwesome5' };
-    if (name.includes('black pepper')) return { icon: 'pepper-hot', library: 'FontAwesome5' };
-    if (name.includes('white pepper')) return { icon: 'pepper-hot', library: 'FontAwesome5' };
-    if (name.includes('sea salt')) return { icon: 'cube', library: 'FontAwesome5' };
-    if (name.includes('kosher salt')) return { icon: 'cube', library: 'FontAwesome5' };
-    
-    // Nuts and Seeds
-    if (name.includes('almond') || name.includes('almonds')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('walnut') || name.includes('walnuts')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('pecan') || name.includes('pecans')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('cashew') || name.includes('cashews')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('peanut') || name.includes('peanuts')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('sunflower seed') || name.includes('sunflower seeds')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('sesame seed') || name.includes('sesame seeds')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('chia seed') || name.includes('chia seeds')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('flax seed') || name.includes('flax seeds')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    
-    // Broth and Liquids
-    if (name.includes('broth') || name.includes('stock')) return { icon: 'cup-water', library: 'MaterialCommunityIcons' };
-    if (name.includes('water')) return { icon: 'tint', library: 'FontAwesome5' };
-    if (name.includes('wine')) return { icon: 'bottle-wine', library: 'MaterialCommunityIcons' };
-    if (name.includes('beer')) return { icon: 'bottle-wine', library: 'MaterialCommunityIcons' };
-    if (name.includes('juice')) return { icon: 'cup-water', library: 'MaterialCommunityIcons' };
-    
-    // Default fallback - use more specific icons based on common patterns
-    if (name.includes('fresh') || name.includes('raw')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('organic')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('dried')) return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('frozen')) return { icon: 'snowflake', library: 'FontAwesome5' };
-    if (name.includes('canned') || name.includes('can')) return { icon: 'package-variant', library: 'MaterialCommunityIcons' };
-    if (name.includes('jar')) return { icon: 'bottle-wine', library: 'MaterialCommunityIcons' };
-    if (name.includes('package') || name.includes('pack')) return { icon: 'package-variant', library: 'MaterialCommunityIcons' };
-    
-    // If no specific match, return a more appropriate default
-    return { icon: 'food-variant', library: 'MaterialCommunityIcons' };
+    // Fallback to a hash-based selection from common food icons
+    const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const fallbackIcons = ['utensils', 'apple-alt', 'carrot', 'fish', 'cheese', 'bread-slice', 'egg', 'leaf', 'seedling', 'lemon'];
+    const iconIndex = hash % fallbackIcons.length;
+    return fallbackIcons[iconIndex];
   };
 
-  // Helper function to render the appropriate icon component
   const renderIngredientIcon = (ingredientName: string) => {
-    const iconInfo = getIngredientIcon(ingredientName);
-    const iconProps = { size: 22, color: "#d46e57" };
-    
-    switch (iconInfo.library) {
-      case 'MaterialCommunityIcons':
-        return <MaterialCommunityIcons name={iconInfo.icon as any} {...iconProps} />;
-      case 'FontAwesome6':
-        return <FontAwesome6 name={iconInfo.icon as any} {...iconProps} />;
-      case 'FontAwesome':
-        return <FontAwesome name={iconInfo.icon as any} {...iconProps} />;
-      case 'FontAwesome5':
-      default:
-        return <FontAwesome5 name={iconInfo.icon as any} {...iconProps} />;
-    }
+    const iconName = getIngredientIcon(ingredientName);
+    return <FontAwesome5 name={iconName} size={22} color="#d46e57" />;
   };
 
   return (
@@ -449,7 +379,7 @@ export default function RecipesScreen() {
               onPress={handleShareRecipe}
               activeOpacity={0.7}
             >
-              <FontAwesome name="share" size={16} color="#4CAF50" />
+              <FontAwesome name="share" size={16} color="#5b6e61" />
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.startFreshButton} 
@@ -527,7 +457,7 @@ export default function RecipesScreen() {
           <View style={styles.recipeIllustrationContainer}>
             <View style={styles.illustrationCircle}>
               <View style={styles.ramenIconContainer}>
-                <FontAwesome6 name="bowl-food" size={60} color="#d46e57" />
+                <FontAwesome5 name="utensils" size={60} color="#d46e57" />
                 <FontAwesome name="arrow-up" size={30} color="#d46e57" style={styles.arrowOverlay} />
               </View>
             </View>

@@ -13,10 +13,11 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useDish } from '../contexts/DishContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ProfileScreen = () => {
   const { user, userProfile, signOut, updateUserProfile } = useAuth();
-  const { currentDish, dishHistory, clearPreferences, clearChatMessages, clearConversationContext, setCurrentDish, setDishHistory, saveDishHistoryToFirestore, finalizeDish } = useDish();
+  const { currentDish, dishHistory, clearPreferences, clearChatMessages, clearConversationContext, setCurrentDish, setDishHistory, saveDishHistoryToFirestore, saveCurrentDishHistoryToLocalStorage, finalizeDish } = useDish();
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(userProfile?.displayName || '');
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -56,12 +57,25 @@ const ProfileScreen = () => {
       
       console.log('Final history to save:', updatedHistory.length, 'dishes');
       
-      // Save updated dish history to Firestore in background (don't wait for it)
+      // Save updated dish history to Firestore and local storage in background (don't wait for it)
       if (updatedHistory.length > 0) {
         console.log('Saving dish history to Firestore...');
         saveDishHistoryToFirestore(updatedHistory).catch(error => {
           console.log('Failed to save dish history on logout:', error);
         });
+        
+        // Also save to local storage as backup
+        console.log('Saving dish history to local storage...');
+        try {
+          const historyData = updatedHistory.map(dish => ({
+            ...dish,
+            timestamp: dish.timestamp.toISOString() // Convert Date to string for storage
+          }));
+          await AsyncStorage.setItem('dishHistory', JSON.stringify(historyData));
+          console.log('Successfully saved dish history to local storage');
+        } catch (error) {
+          console.log('Failed to save dish history to local storage:', error);
+        }
       } else {
         console.log('No dishes to save');
       }

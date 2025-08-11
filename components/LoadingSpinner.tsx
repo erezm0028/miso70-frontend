@@ -158,8 +158,8 @@ export default function LoadingSpinner({ visible = false }: LoadingSpinnerProps)
           {/* Pot Body */}
           <View style={styles.pot}>
             {/* Pot Handles */}
-            <View style={[styles.handle, { left: -6 }]} />
-            <View style={[styles.handle, { right: -6 }]} />
+            <View style={[styles.handle, { left: -7 }]} />
+            <View style={[styles.handle, { right: -7 }]} />
           </View>
         </View>
 
@@ -223,7 +223,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#4b6053',
     borderRadius: 8,
     position: 'relative',
-    marginLeft: -2, // Move pot slightly to the left to center it
+    marginLeft: -4, // Move pot slightly to the left to center it
   },
   handle: {
     position: 'absolute',

@@ -12,6 +12,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { useDish } from '../contexts/DishContext';
 
+
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
