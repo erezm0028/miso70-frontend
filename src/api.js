@@ -6,9 +6,9 @@ const getBaseUrl = () => {
     return 'http://10.100.102.9:3001';
   }
   
-  // For production/standalone app, use a deployed backend URL
-  // You'll need to deploy your backend to a service like Heroku, Railway, or Vercel
-  return 'https://your-deployed-backend-url.com'; // TODO: Replace with your deployed backend URL
+  // For standalone app, use your Mac's IP address
+  // Make sure your backend is running on your Mac and both devices are on same WiFi
+  return 'http://10.100.102.9:3001'; // Your Mac's IP address - update this to your Mac's current IP
 };
 
 const BASE_URL = getBaseUrl();
