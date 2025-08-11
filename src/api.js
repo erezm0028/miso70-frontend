@@ -1,14 +1,8 @@
 // Dynamic BASE_URL configuration for different environments
 const getBaseUrl = () => {
-  // For development with Expo Go or development client
-  if (__DEV__) {
-    // Use your local IP for development
-    return 'http://10.100.102.9:3001';
-  }
-  
-  // For standalone app, use your Mac's IP address
+  // For standalone app, always use your Mac's IP address
   // Make sure your backend is running on your Mac and both devices are on same WiFi
-  return 'http://10.100.102.9:3001'; // Your Mac's IP address - update this to your Mac's current IP
+  return 'http://10.100.102.9:3001'; // Your Mac's IP address
 };
 
 const BASE_URL = getBaseUrl();
