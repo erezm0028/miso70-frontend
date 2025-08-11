@@ -1,8 +1,7 @@
 // Dynamic BASE_URL configuration for different environments
 const getBaseUrl = () => {
-  // For standalone app, always use your Mac's IP address
-  // Make sure your backend is running on your Mac and both devices are on same WiFi
-  return 'http://10.100.102.9:3001'; // Your Mac's IP address
+  // For standalone app, use the cloud backend
+  return 'https://miso70-backend.onrender.com';
 };
 
 const BASE_URL = getBaseUrl();
