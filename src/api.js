@@ -1,4 +1,17 @@
-const BASE_URL = 'http://10.100.102.9:3001'; // Change to your backend URL or local IP if testing on a device
+// Dynamic BASE_URL configuration for different environments
+const getBaseUrl = () => {
+  // For development with Expo Go or development client
+  if (__DEV__) {
+    // Use your local IP for development
+    return 'http://10.100.102.9:3001';
+  }
+  
+  // For production/standalone app, use a deployed backend URL
+  // You'll need to deploy your backend to a service like Heroku, Railway, or Vercel
+  return 'https://your-deployed-backend-url.com'; // TODO: Replace with your deployed backend URL
+};
+
+const BASE_URL = getBaseUrl();
 import * as Clipboard from 'expo-clipboard';
 
 export async function chatWithChef(messages, currentDish = null) {
