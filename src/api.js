@@ -32,10 +32,12 @@ export async function chatWithChef(messages, currentDish = null) {
 
 export async function generateDish(preferences) {
   console.log('API: Sending preferences to backend:', JSON.stringify({ preferences }, null, 2));
+  console.log('API: Using BASE_URL:', BASE_URL);
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
     
+    console.log('API: Making request to:', `${BASE_URL}/generate-dish`);
     const res = await fetch(`${BASE_URL}/generate-dish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -48,6 +50,7 @@ export async function generateDish(preferences) {
     if (!res.ok) {
       const errorText = await res.text();
       console.error('API: Generate dish error response:', errorText);
+      console.error('API: Response status:', res.status, res.statusText);
       throw new Error(`Failed to generate dish: ${res.status} ${res.statusText}`);
     }
     
@@ -56,6 +59,8 @@ export async function generateDish(preferences) {
     return data.dish;
   } catch (error) {
     console.error('API: Generate dish request failed:', error);
+    console.error('API: Error name:', error.name);
+    console.error('API: Error message:', error.message);
     if (error.name === 'AbortError') {
       throw new Error('Request timed out after 60 seconds');
     }
