@@ -1,14 +1,17 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Image } from 'react-native';
-import { generateDish as generateDishAPI, generateImage as generateImageAPI, getRecipeInfo as getRecipeInfoAPI, modifyRecipe as modifyRecipeAPI, cookDish as cookDishAPI, remixDish as remixDishAPI, fuseDish as fuseDishAPI, BASE_URL } from '../src/api';
+import { generateDish as generateDishAPI, generateImage as generateImageAPI, getRecipeInfo as getRecipeInfoAPI, modifyRecipe as modifyRecipeAPI, cookDish as cookDishAPI, remixDish as remixDishAPI, fuseDish as fuseDishAPI } from '../src/api';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../src/firebase';
 import { useAuth } from './AuthContext';
 import NetInfo from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Use the same BASE_URL from api.js
-const API_BASE_URL = BASE_URL;
+// Import BASE_URL from api.js
+const getBaseUrl = () => {
+  return 'http://192.168.1.107:3001';
+};
+const API_BASE_URL = getBaseUrl();
 
 type Dish = {
   id: string;
@@ -75,8 +78,6 @@ type DishContextType = {
   setIsGeneratingRecipe: React.Dispatch<React.SetStateAction<boolean>>;
   isGeneratingImage: boolean;
   isLoadingHistory: boolean;
-  isPendingConfirmation: boolean;
-  setIsPendingConfirmation: React.Dispatch<React.SetStateAction<boolean>>;
   
   // Error state
   imageError: string | null;
@@ -142,8 +143,6 @@ const DishContext = createContext<DishContextType>({
   setIsGeneratingRecipe: () => {},
   isGeneratingImage: false,
   isLoadingHistory: false,
-  isPendingConfirmation: false,
-  setIsPendingConfirmation: () => {},
   imageError: null,
   setImageError: () => {},
   clearImageError: () => {},
@@ -215,7 +214,6 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isGeneratingRecipe, setIsGeneratingRecipe] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isDishFinal, setIsDishFinal] = useState(false);
-  const [isPendingConfirmation, setIsPendingConfirmation] = useState(false);
 
   // Helper function to check if any preferences are set
   const hasPreferences = () => {
@@ -448,19 +446,6 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       try {
         // Call the backend to generate a dish with the preserved context
-        // Add timeout to prevent long waits
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => {
-          console.log('RegenerateDishWithContext: Request timed out after 30 seconds, aborting...');
-          controller.abort();
-        }, 60000); // 60 second timeout for slow connections
-        
-        console.log('RegenerateDishWithContext: About to make fetch request to:', `${API_BASE_URL}/generate-dish`);
-        console.log('RegenerateDishWithContext: Request body:', JSON.stringify({
-          dish: preservedContext,
-          preferences: currentDish?.preferences || {}
-        }));
-        
         const response = await fetch(`${API_BASE_URL}/generate-dish`, {
           method: 'POST',
           headers: {
@@ -470,10 +455,7 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
             dish: preservedContext,
             preferences: currentDish?.preferences || {}
           }),
-          signal: controller.signal,
         });
-        
-        clearTimeout(timeoutId);
         
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -481,7 +463,6 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         const data = await response.json();
         console.log('RegenerateDishWithContext: Backend response:', data);
-        console.log('RegenerateDishWithContext: About to parse dish data...');
         
         // Parse the dish data like the regular generateDish function does
         let parsed = data.dish;
@@ -502,9 +483,6 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
           parsed = parseDishString(data.dish);
         }
         
-        console.log('RegenerateDishWithContext: Parsed dish data:', parsed);
-        console.log('RegenerateDishWithContext: About to create new dish object...');
-        
         // Create a new dish object with the backend-generated content
         const newDish: Dish = {
           id: Date.now().toString(),
@@ -518,22 +496,19 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
         
         // Set the dish immediately
-        console.log('RegenerateDishWithContext: About to set current dish...');
         setCurrentDish(newDish);
-        console.log('RegenerateDishWithContext: Current dish set, updating loading states...');
         setIsGeneratingDish(false);
         setIsGeneratingImage(true);
         
         // Generate image for the new dish
         const imagePrompt = `${newDish.title}. ${newDish.description}`;
         console.log('RegenerateDishWithContext: Starting image generation with prompt:', imagePrompt);
-        console.log('RegenerateDishWithContext: About to call generateImageAPI...');
         
         // Set a timeout to prevent infinite loading
         const imageTimeout = setTimeout(() => {
           console.warn('RegenerateDishWithContext: Image generation timeout, stopping loading');
           setIsGeneratingImage(false);
-        }, 60000); // 60 second timeout for slow connections
+        }, 30000); // 30 second timeout
         
         generateImageAPI(imagePrompt)
           .then(generatedImage => {
@@ -559,15 +534,7 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error('RegenerateDishWithContext: Backend dish generation failed:', error);
         setIsGeneratingDish(false);
         setIsGeneratingImage(false);
-        
-        // Provide more specific error messages
-        if (error.name === 'AbortError') {
-          setImageError('Request timed out. Please check your connection and try again.');
-        } else if (error.message.includes('Network request timed out')) {
-          setImageError('Network timeout. Please check your connection and try again.');
-        } else {
-          setImageError('Failed to generate dish. Please try again.');
-        }
+        setImageError('Failed to generate dish. Please try again.');
       }
     } else {
       // Fallback to regular generateDish with current preferences
@@ -1287,10 +1254,6 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (currentDish && 
         (!currentDish.image || currentDish.image.trim() === '') && 
         !isGeneratingImage &&
-        !isModifyingRecipe &&
-        !isGeneratingDish &&
-        !isGeneratingSpecificDish &&
-        !isPendingConfirmation &&
         currentDish.title && 
         currentDish.description) {
       console.log('DishContext: Auto-generating image for dish:', currentDish.title);
@@ -1302,16 +1265,8 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
         
         // Double-check conditions after delay
-        if (!currentDish || currentDish.image || isGeneratingImage || isModifyingRecipe || isGeneratingDish || isGeneratingSpecificDish || isPendingConfirmation) {
-          console.log('DishContext: Skipping image generation after delay - conditions changed:', {
-            hasCurrentDish: !!currentDish,
-            hasImage: !!currentDish?.image,
-            isGeneratingImage,
-            isModifyingRecipe,
-            isGeneratingDish,
-            isGeneratingSpecificDish,
-            isPendingConfirmation
-          });
+        if (!currentDish || currentDish.image || isGeneratingImage) {
+          console.log('DishContext: Skipping image generation after delay - conditions changed');
           return;
         }
         
@@ -1323,14 +1278,13 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const imageTimeout = setTimeout(() => {
           console.warn('DishContext: Auto-image generation timeout, stopping loading');
           setIsGeneratingImage(false);
-        }, 60000); // 60 second timeout for slow connections
+        }, 30000); // 30 second timeout
       
         generateImageAPI(imagePrompt)
         .then(generatedImage => {
           clearTimeout(imageTimeout);
           console.log('DishContext: Image generation completed at:', new Date().toISOString());
           console.log('DishContext: Generated image URL:', generatedImage);
-          console.log('DishContext: Current dish before image update:', currentDish?.title);
           if (generatedImage && generatedImage.trim()) {
             // Prefetch the image for better performance
             Image.prefetch(generatedImage.trim()).catch(err => {
@@ -1338,15 +1292,9 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // Continue anyway - prefetch failure shouldn't block the flow
             });
             
-            console.log('DishContext: Setting image URL on dish:', generatedImage.trim());
-            setCurrentDish(prev => {
-              const updated = prev ? { ...prev, image: generatedImage.trim() } : null;
-              console.log('DishContext: Updated dish with image:', updated?.title, updated?.image ? 'Has image' : 'No image');
-              return updated;
-            });
+            setCurrentDish(prev => prev ? { ...prev, image: generatedImage.trim() } : null);
             // Keep isGeneratingImage true until image is actually loaded in UI
             // It will be set to false when the image loads in DishScreen
-            console.log('DishContext: Keeping isGeneratingImage=true until image loads in UI');
           } else {
             console.warn('DishContext: No image generated, stopping loading');
             setIsGeneratingImage(false);
@@ -1368,10 +1316,6 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
         hasImage: !!currentDish?.image,
         imageValue: currentDish?.image,
         isGeneratingImage,
-        isModifyingRecipe,
-        isGeneratingDish,
-        isGeneratingSpecificDish,
-        isPendingConfirmation,
         hasTitle: !!currentDish?.title,
         hasDescription: !!currentDish?.description
       });
@@ -1411,7 +1355,6 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const generateRecipeInfo = async (dishTitle: string): Promise<void> => {
     try {
       console.log('Generating recipe info for:', dishTitle);
-      setIsGeneratingRecipe(true); // Set loading state for recipe generation
       const recipe = await getRecipeInfoAPI(dishTitle);
       console.log('Recipe info received:', recipe);
       
@@ -1462,8 +1405,6 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         return updatedDish;
       });
-    } finally {
-      setIsGeneratingRecipe(false); // Reset loading state
     }
   };
 
@@ -1556,7 +1497,7 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
           title: backendUpdatedDish?.title || recipe.title || currentDishSnapshot.title,
           description: backendUpdatedDish?.description || recipe.description || currentDishSnapshot.description,
           recipe,
-          image: '' // Empty image - will be generated by auto-generation
+          image: newImageUrl || currentDishSnapshot.image // Use new image if provided
         };
       } else {
         // For minor modifications, use backend-provided updated dish info if available
@@ -1565,7 +1506,7 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
           title: backendUpdatedDish?.title || currentDishSnapshot.title,
           description: backendUpdatedDish?.description || currentDishSnapshot.description,
           recipe,
-          image: '' // Empty image - will be generated by auto-generation
+          image: newImageUrl || currentDishSnapshot.image // Use new image if provided
         };
       }
       
@@ -1581,8 +1522,33 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       setCurrentDish(modifiedDish);
       
-      // Skip image generation during modification - let auto-generation handle it when dish is loaded
-      console.log('DishContext: Skipping image generation during modification - will auto-generate when needed');
+      // If no new image was provided by the backend, generate one
+      if (!newImageUrl && modifiedDish.image === currentDishSnapshot.image) {
+        console.log('DishContext: No new image provided by backend, generating one...');
+        setIsGeneratingImage(true);
+        const imagePrompt = `${modifiedDish.title}. ${modifiedDish.description}`;
+        
+        // Set a timeout to prevent infinite loading
+        const imageTimeout = setTimeout(() => {
+          console.warn('DishContext: Image generation timeout for modified dish, stopping loading');
+          setIsGeneratingImage(false);
+        }, 30000); // 30 second timeout
+        
+        generateImageAPI(imagePrompt)
+          .then(generatedImage => {
+            clearTimeout(imageTimeout);
+            console.log('DishContext: Generated image for modified dish:', generatedImage);
+            if (generatedImage && generatedImage.trim()) {
+              setCurrentDish(prev => prev ? { ...prev, image: generatedImage.trim() } : null);
+            }
+            setIsGeneratingImage(false);
+          })
+          .catch(imgErr => {
+            clearTimeout(imageTimeout);
+            console.error('DishContext: Image generation for modified dish failed:', imgErr);
+            setIsGeneratingImage(false);
+          });
+      }
       
       // Add the modified dish as a new entry in history and save to storage
       setDishHistory(prev => {
@@ -1927,7 +1893,7 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
         title: backendUpdatedDish?.title || recipe.title || currentDish.title,
         description: backendUpdatedDish?.description || recipe.description || currentDish.description,
         recipe,
-        image: '' // Empty image - will be generated by auto-generation
+        image: newImageUrl || currentDish.image
       };
       
       // Create a new dish entry with a unique ID for the remix
@@ -1942,8 +1908,33 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       setCurrentDish(remixedDish);
       
-      // Skip image generation during remix - let auto-generation handle it when dish is loaded
-      console.log('DishContext: Skipping image generation during remix - will auto-generate when needed');
+      // If no new image was provided by the backend, generate one
+      if (!newImageUrl && remixedDish.image === currentDish.image) {
+        console.log('DishContext: No new image provided by backend for remix, generating one...');
+        setIsGeneratingImage(true);
+        const imagePrompt = `${remixedDish.title}. ${remixedDish.description}`;
+        
+        // Set a timeout to prevent infinite loading
+        const imageTimeout = setTimeout(() => {
+          console.warn('DishContext: Image generation timeout for remixed dish, stopping loading');
+          setIsGeneratingImage(false);
+        }, 30000); // 30 second timeout
+        
+        generateImageAPI(imagePrompt)
+          .then(generatedImage => {
+            clearTimeout(imageTimeout);
+            console.log('DishContext: Generated image for remixed dish:', generatedImage);
+            if (generatedImage && generatedImage.trim()) {
+              setCurrentDish(prev => prev ? { ...prev, image: generatedImage.trim() } : null);
+            }
+            setIsGeneratingImage(false);
+          })
+          .catch(imgErr => {
+            clearTimeout(imageTimeout);
+            console.error('DishContext: Image generation for remixed dish failed:', imgErr);
+            setIsGeneratingImage(false);
+          });
+      }
       
       // Add the remixed dish as a new entry in history and save to storage
       setDishHistory(prev => {
@@ -2158,7 +2149,7 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
         title: backendUpdatedDish?.title || recipe.title || currentDishSnapshot.title,
         description: backendUpdatedDish?.description || recipe.description || currentDishSnapshot.description,
         recipe,
-        image: '' // Empty image - will be generated by auto-generation
+        image: newImageUrl || currentDishSnapshot.image
       };
       
       // Create a new dish entry with a unique ID for the fusion
@@ -2173,8 +2164,33 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       setCurrentDish(fusedDish);
       
-      // Skip image generation during fusion - let auto-generation handle it when dish is loaded
-      console.log('DishContext: Skipping image generation during fusion - will auto-generate when needed');
+      // If no new image was provided by the backend, generate one
+      if (!newImageUrl && fusedDish.image === currentDishSnapshot.image) {
+        console.log('DishContext: No new image provided by backend for fusion, generating one...');
+        setIsGeneratingImage(true);
+        const imagePrompt = `${fusedDish.title}. ${fusedDish.description}`;
+        
+        // Set a timeout to prevent infinite loading
+        const imageTimeout = setTimeout(() => {
+          console.warn('DishContext: Image generation timeout for fused dish, stopping loading');
+          setIsGeneratingImage(false);
+        }, 30000); // 30 second timeout
+        
+        generateImageAPI(imagePrompt)
+          .then(generatedImage => {
+            clearTimeout(imageTimeout);
+            console.log('DishContext: Generated image for fused dish:', generatedImage);
+            if (generatedImage && generatedImage.trim()) {
+              setCurrentDish(prev => prev ? { ...prev, image: generatedImage.trim() } : null);
+            }
+            setIsGeneratingImage(false);
+          })
+          .catch(imgErr => {
+            clearTimeout(imageTimeout);
+            console.error('DishContext: Image generation for fused dish failed:', imgErr);
+            setIsGeneratingImage(false);
+          });
+      }
       
       // Add the fused dish as a new entry in history and save to storage
       setDishHistory(prev => {
@@ -2385,9 +2401,7 @@ export const DishProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsGeneratingRecipe,
       isGeneratingImage,
       isLoadingHistory,
-      isPendingConfirmation,
-      setIsPendingConfirmation,
-      imageError,
+          imageError,
     setImageError,
     clearImageError,
     clearImageGeneration,

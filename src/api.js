@@ -1,10 +1,12 @@
 // Dynamic BASE_URL configuration for different environments
 const getBaseUrl = () => {
-  // For standalone app, use the cloud backend
-  return 'https://miso70-backend.onrender.com';
+  // For local development, use HTTP with port 3001
+ //return 'https://miso70-backend.onrender.com'; 
+ return 'http://192.168.1.78:3001';
 };
 
 const BASE_URL = getBaseUrl();
+export { BASE_URL }; // Export BASE_URL so other files can use it
 import * as Clipboard from 'expo-clipboard';
 
 export async function chatWithChef(messages, currentDish = null) {
@@ -33,10 +35,12 @@ export async function generateDish(preferences) {
   console.log('API: Sending preferences to backend:', JSON.stringify({ preferences }, null, 2));
   console.log('API: Using BASE_URL:', BASE_URL);
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-    
     console.log('API: Making request to:', `${BASE_URL}/generate-dish`);
+    
+    // Add timeout to prevent long waits
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for slow connections
+    
     const res = await fetch(`${BASE_URL}/generate-dish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -59,10 +63,19 @@ export async function generateDish(preferences) {
     console.error('API: Generate dish request failed:', error);
     console.error('API: Error name:', error.name);
     console.error('API: Error message:', error.message);
+    
+    // Provide more specific error messages for different types of network issues
     if (error.name === 'AbortError') {
-      throw new Error('Request timed out after 60 seconds');
+      throw new Error('Request timed out (60s). Your connection might be slow. Please try again.');
+    } else if (error.message.includes('Network request failed') || error.message.includes('TypeError: Network request failed')) {
+      throw new Error('Network connection failed. Please check your internet connection and try again.');
+    } else if (error.message.includes('Network request timed out')) {
+      throw new Error('Network timeout. Your connection might be slow. Please try again.');
+    } else if (error.message.includes('Failed to fetch')) {
+      throw new Error('Unable to reach server. Please check your internet connection.');
+    } else {
+      throw error;
     }
-    throw error;
   }
 }
 
@@ -90,22 +103,54 @@ export async function getRecipeInfo(dishName) {
   }
 }
 
+export async function cookDish(dishName) {
+  try {
+    console.log('API: Sending cook dish request for:', dishName);
+    const res = await fetch(`${BASE_URL}/cook-dish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dishName }),
+    });
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error('API: Cook dish error response:', errorText);
+      throw new Error(`Cook Dish API error: ${res.status} ${res.statusText}`);
+    }
+    
+    const data = await res.json();
+    console.log('API: Cook dish response received:', data);
+    return data.recipe;
+  } catch (error) {
+    console.error('API: Cook dish request failed:', error);
+    throw error;
+  }
+}
+
 export async function generateImage(dish) {
   try {
     console.log('API: Starting image generation for dish:', dish);
+    console.log('API: Using BASE_URL for image generation:', BASE_URL);
+    console.log('API: Full URL will be:', `${BASE_URL}/generate-image`);
+    console.log('API: About to make fetch request...');
     
-    // Create a controller for timeout
+    // Add timeout to prevent long waits (DALL-E can take 15-20+ seconds)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout for image generation on slow connections
     
     const res = await fetch(`${BASE_URL}/generate-image`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Accept': 'application/json'
+      },
       body: JSON.stringify({ dish }),
       signal: controller.signal,
     });
     
     clearTimeout(timeoutId);
+    console.log('API: Fetch request completed, status:', res.status);
     
     if (!res.ok) {
       const errorText = await res.text();
@@ -115,11 +160,37 @@ export async function generateImage(dish) {
     
     const data = await res.json();
     console.log('API: Image generation response received:', data);
+    console.log('API: Response status text:', res.statusText);
+    console.log('API: Response headers:', Object.fromEntries(res.headers.entries()));
     console.log('API: Image URL extracted:', data.imageUrl);
+    console.log('API: Image URL length:', data.imageUrl?.length);
+    console.log('API: Image URL starts with https:', data.imageUrl?.startsWith('https://'));
+    console.log('API: Response data type:', typeof data);
+    console.log('API: Response data keys:', Object.keys(data));
+    
+    if (!data.imageUrl) {
+      console.error('API: No imageUrl in response data');
+      throw new Error('No image URL received from server');
+    }
+    
     return data.imageUrl;
   } catch (error) {
     console.error('API: Image generation request failed:', error);
-    throw error;
+    console.error('API: Error name:', error.name);
+    console.error('API: Error message:', error.message);
+    
+    // Provide more specific error messages for different types of network issues
+    if (error.name === 'AbortError') {
+      throw new Error('Image generation timed out (90s). Your connection might be slow. Please try again.');
+    } else if (error.message.includes('Network request failed') || error.message.includes('TypeError: Network request failed')) {
+      throw new Error('Network connection failed. Please check your internet connection and try again.');
+    } else if (error.message.includes('Network request timed out')) {
+      throw new Error('Network timeout. Your connection might be slow. Please try again.');
+    } else if (error.message.includes('Failed to fetch')) {
+      throw new Error('Unable to reach server. Please check your internet connection.');
+    } else {
+      throw error;
+    }
   }
 }
 
@@ -152,7 +223,13 @@ export async function modifyRecipe(currentDish, modification) {
   
   const data = await res.json();
   console.log('API: modifyRecipe response data:', data);
-  return data;
+  
+  // Return enhanced data with new image and updated dish info
+  return {
+    ...data,
+    newImageUrl: data.newImageUrl,
+    updatedDish: data.updatedDish
+  };
 }
 
 export async function getChatDishSuggestion(userMessage, preferences) {
@@ -192,9 +269,45 @@ export async function fuseDish(currentDish, modification) {
     }
     
     const data = await res.json();
-    return data;
+    console.log('API: Fuse dish response data:', data);
+    
+    // Return enhanced data with new image and updated dish info
+    return {
+      ...data,
+      newImageUrl: data.newImageUrl,
+      updatedDish: data.updatedDish
+    };
   } catch (error) {
     console.error('API: Fuse dish request failed:', error);
+    throw error;
+  }
+}
+
+export async function remixDish(currentDish, userRequest, preferences = {}) {
+  try {
+    const res = await fetch(`${BASE_URL}/remix-dish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentDish, userRequest, preferences }),
+    });
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error('API: Remix dish error response:', errorText);
+      throw new Error(`Remix dish failed: ${res.status} ${res.statusText}`);
+    }
+    
+    const data = await res.json();
+    console.log('API: Remix dish response data:', data);
+    
+    // Return enhanced data with new image and updated dish info
+    return {
+      ...data,
+      newImageUrl: data.newImageUrl,
+      updatedDish: data.updatedDish
+    };
+  } catch (error) {
+    console.error('API: Remix dish request failed:', error);
     throw error;
   }
 }

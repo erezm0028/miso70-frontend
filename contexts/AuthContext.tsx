@@ -128,8 +128,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Sign up function
   const signUp = async (email: string, password: string, displayName: string) => {
     try {
-      // Add a small delay to give user feedback
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // No delay - immediate feedback
       
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
@@ -162,8 +161,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Sign in function
   const signIn = async (email: string, password: string) => {
     try {
-      // Add a small delay to give user feedback
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // No delay - immediate feedback
       
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;

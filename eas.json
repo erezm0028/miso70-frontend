@@ -19,6 +19,15 @@
       "ios": {
         "resourceClass": "m-medium"
       }
+    },
+    "standalone": {
+      "distribution": "internal",
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://10.100.102.9:3001"
+      }
     }
   },
   "submit": {

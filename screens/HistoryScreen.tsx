@@ -59,34 +59,71 @@ function groupHistory(dishes) {
 }
 
 export default function HistoryScreen() {
-  const { dishHistory, isLoadingHistory, loadDishFromHistory, setDishHistory, setCurrentDish } = useDish();
+  const { dishHistory, isLoadingHistory, loadDishFromHistory, setDishHistory, setCurrentDish, updatePreferences, cookDish } = useDish();
+  
+  // Debug: Log dish history
+  console.log('HistoryScreen rendered with dishHistory:', dishHistory?.length, 'dishes');
+  if (dishHistory && dishHistory.length > 0) {
+    console.log('First dish:', dishHistory[0].title, 'has preferences:', !!dishHistory[0].preferences);
+  }
   const navigation = useNavigation();
   const [error, setError] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
 
   const hasHistory = dishHistory && dishHistory.length > 0;
 
-  const handleLoadDish = (dishId: string) => {
+  const handleLoadDish = async (dishId: string) => {
     try {
-      loadDishFromHistory(dishId);
-      navigation.navigate('Dish');
+      console.log('=== HISTORY LOAD START ===');
+      await loadDishFromHistory(dishId);
+      console.log('History load completed, navigating to preferences...');
+      // Navigate to preferences first to show the restored preferences, then to dish
+      navigation.navigate('Preferences' as never);
+      // Navigate immediately - preferences are already loaded
+      console.log('Navigating to dish screen...');
+      navigation.navigate('Dish' as never);
+      console.log('=== HISTORY LOAD COMPLETE ===');
     } catch (e) {
+      console.error('Error in handleLoadDish:', e);
       setError(true);
     }
   };
 
   const handleReplayDish = async (dish) => {
+    console.log('handleReplayDish called with dish:', dish.title);
     setLoading(true);
     try {
       // Add a minimum loading time to ensure the spinner is visible
       const startTime = Date.now();
       setCurrentDish(dish);
-      const elapsed = Date.now() - startTime;
-      const minLoadingTime = 800; // 800ms minimum
       
-      if (elapsed < minLoadingTime) {
-        await new Promise(resolve => setTimeout(resolve, minLoadingTime - elapsed));
+      // Restore the preferences that were used to create this dish
+      if (dish.preferences) {
+        console.log('Restoring preferences from history:', dish.preferences);
+        console.log('Preferences keys:', Object.keys(dish.preferences));
+        console.log('Dietary restrictions:', dish.preferences.dietaryRestrictions);
+        console.log('Cuisines:', dish.preferences.cuisines);
+        console.log('Classic dishes:', dish.preferences.classicDishes);
+        console.log('Plate styles:', dish.preferences.plateStyles);
+        updatePreferences(dish.preferences);
+      } else {
+        console.log('No preferences found in dish history');
       }
+      
+      // Check if the dish has a valid recipe with ingredients
+      const hasValidRecipe = dish.recipe && 
+                            dish.recipe.ingredients && 
+                            Array.isArray(dish.recipe.ingredients) && 
+                            dish.recipe.ingredients.length > 0;
+      
+      if (!hasValidRecipe) {
+        console.log('Dish has no valid recipe, automatically cooking dish...');
+        await cookDish(dish.title);
+        console.log('Recipe generation completed for history dish');
+      }
+      
+      const elapsed = Date.now() - startTime;
+      // No minimum loading time - navigate immediately
       
       navigation.navigate('Dish' as never);
     } catch (e) {
@@ -147,12 +184,15 @@ export default function HistoryScreen() {
           <>
             <CustomText style={styles.sectionTitle}>Recent Dishes</CustomText>
             {recent.map((dish, idx) => (
-              <TouchableOpacity
-                key={dish.id || idx}
-                style={styles.historyEntry}
-                onPress={() => handleReplayDish(dish)}
-                activeOpacity={0.7}
-              >
+                <TouchableOpacity
+                  key={dish.id || idx}
+                  style={styles.historyEntry}
+                  onPress={() => {
+                    console.log('TouchableOpacity pressed for dish:', dish.title);
+                    handleReplayDish(dish);
+                  }}
+                  activeOpacity={0.7}
+                >
                 <View>
                   <CustomText style={styles.historyDishName}>{dish.title}</CustomText>
                   <CustomText style={styles.historySubtitle}>

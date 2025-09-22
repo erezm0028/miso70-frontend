@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Image, TouchableOpacity, StyleSheet, Dimensions, ScrollView, Alert, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Header from '../components/Header';
@@ -9,9 +9,12 @@ import { generateDish, generateShareText } from '../src/api'; // Adjust path if 
 import { Share } from 'react-native';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorScreen from '../components/ErrorScreen';
-import { useNavigation } from '@react-navigation/native';
+import ContextTags from '../components/ContextTags';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 const screenWidth = Dimensions.get('window').width;
+
 
 export default function DishScreen() {
   const { 
@@ -25,26 +28,95 @@ export default function DishScreen() {
     clearConversationContext,
     clearChatMessages,
     imageError,
+    setImageError,
     clearImageError,
+    clearImageGeneration,
     isGeneratingImage,
-    isGeneratingDish
+    isGeneratingDish,
+    setIsGeneratingDish,
+    cookDish,
+    regenerateDishWithContext,
+    conversationContext,
+    removeConversationPreference
   } = useDish();
   const navigation = useNavigation();
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [showStartFreshModal, setShowStartFreshModal] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [lastDishId, setLastDishId] = useState<string | null>(null);
 
   // Debug loading state changes
-  React.useEffect(() => {
+  useEffect(() => {
     console.log('DishScreen - Loading states changed:');
     console.log('  - isGeneratingDish:', isGeneratingDish);
     console.log('  - isGeneratingImage:', isGeneratingImage);
+    console.log('  - imageLoaded:', imageLoaded);
     console.log('  - currentDish exists:', !!currentDish);
     if (currentDish) {
       console.log('  - currentDish.image:', currentDish.image ? 'Has image' : 'No image');
+      console.log('  - currentDish.image URL:', currentDish.image);
+      console.log('  - currentDish.title:', currentDish.title);
     }
-  }, [isGeneratingDish, isGeneratingImage, currentDish]);
+    const shouldShowSpinner = isGeneratingDish || isGeneratingImage || (currentDish && !imageLoaded);
+    console.log('  - Loading spinner visible:', shouldShowSpinner);
+    console.log('  - Spinner reason:', {
+      isGeneratingDish,
+      isGeneratingImage,
+      waitingForImageLoad: currentDish && !imageLoaded
+    });
+  }, [isGeneratingDish, isGeneratingImage, imageLoaded, currentDish]);
+
+  // Reset image error and image loaded state when dish changes
+  useEffect(() => {
+    if (currentDish) {
+      clearImageError(); // Clear any previous image errors
+      
+      // Check if this is a new dish or the same dish
+      const isNewDish = lastDishId !== currentDish.id;
+      
+      if (isNewDish) {
+        // For new dishes, reset image loaded state and wait for image to load
+        setImageLoaded(false);
+        setLastDishId(currentDish.id);
+        
+        // Preload the image if URL exists
+        if (currentDish.image) {
+          console.log('DishScreen: Preloading image for faster display...');
+          Image.prefetch(currentDish.image)
+            .then(() => {
+              console.log('DishScreen: Image preloaded successfully');
+            })
+            .catch((error) => {
+              console.log('DishScreen: Image preload failed:', error);
+            });
+        }
+      } else {
+        // For existing dishes (same ID), still wait for image to load to ensure spinner shows
+        setImageLoaded(false);
+      }
+    }
+  }, [currentDish?.id, currentDish?.image, clearImageError, lastDishId]);
+
+  // Fallback timeout for image loading - if image doesn't load within 10 seconds, assume it's loaded
+  useEffect(() => {
+    if (currentDish && currentDish.image && !imageLoaded) {
+      console.log('DishScreen: Setting up 10s fallback timeout for image loading');
+      const timeoutId = setTimeout(() => {
+        console.log('DishScreen: Image loading timeout reached, forcing imageLoaded=true');
+        setImageLoaded(true);
+        clearImageGeneration(); // Also clear the generation state
+      }, 10000); // 10 second timeout
+
+      return () => {
+        console.log('DishScreen: Clearing image loading timeout');
+        clearTimeout(timeoutId);
+      };
+    }
+  }, [currentDish?.image, imageLoaded, clearImageGeneration]);
 
   const handleGenerateDish = async () => {
     clearImageError();
+    setLastDishId(null); // Reset last dish ID to ensure new dish is treated as new
     try {
       // Generate dish with current preferences (preserve them)
       console.log('DishScreen: Current preferences before generation:', preferences);
@@ -61,35 +133,58 @@ export default function DishScreen() {
 
   const handleReDish = async () => {
     clearImageError();
+    setLastDishId(null); // Reset last dish ID to ensure regenerated dish is treated as new
     try {
       // Save current dish to history before regenerating
       if (currentDish) {
         finalizeDish();
       }
       
-      // Generate new dish with current preferences (don't clear them)
+
+      
+      // Use the new context-aware regeneration function
+      console.log('DishScreen: Using context-aware re-dish generation');
+      console.log('DishScreen: Current dish chat context:', currentDish?.chatContext);
       console.log('DishScreen: Current preferences for re-dish:', preferences);
-      console.log('DishScreen: Re-dish - Has dietary restrictions:', preferences.dietaryRestrictions?.length > 0);
-      console.log('DishScreen: Re-dish - Has cuisines:', preferences.cuisines?.length > 0);
-      console.log('DishScreen: Re-dish - Has plate styles:', preferences.plateStyles?.length > 0);
-      console.log('DishScreen: Re-dish - Has classic dishes:', preferences.classicDishes?.length > 0);
-      console.log('DishScreen: Re-dish - Has ingredient preferences:', preferences.ingredientPreferences?.length > 0);
-      await generateDish(preferences);
+      await regenerateDishWithContext();
     } catch (err) {
       // Error is handled by the context, no need to set local error
     }
   };
 
-  const handleStartCooking = () => {
-    // Finalize the dish before navigating to recipe
-    if (currentDish) {
-      finalizeDish();
-    }
+  const handleRemoveContext = (type: string, value: string) => {
+    console.log('DishScreen: handleRemoveContext called with type:', type, 'value:', value);
+    console.log('DishScreen: About to call removeConversationPreference');
+    removeConversationPreference(type, value);
+    console.log('DishScreen: removeConversationPreference called');
+  };
+
+  const handleStartCooking = async () => {
+    if (!currentDish) return;
     
-    if (currentDish && currentDish.recipe && Array.isArray(currentDish.recipe.ingredients) && currentDish.recipe.ingredients.length > 0) {
-      navigation.navigate('Recipe' as never);
+    console.log('DishScreen: handleStartCooking called for dish:', currentDish.title);
+    console.log('DishScreen: Current recipe exists:', !!currentDish.recipe);
+    console.log('DishScreen: Current recipe ingredients:', currentDish.recipe?.ingredients?.length || 0);
+    
+    // Always finalize dish and navigate first
+    finalizeDish();
+    navigation.navigate('Recipe' as never);
+    
+    // If recipe doesn't exist, generate it in background
+    if (!currentDish.recipe || !Array.isArray(currentDish.recipe.ingredients) || currentDish.recipe.ingredients.length === 0) {
+      console.log('DishScreen: Recipe not found, generating recipe in background...');
+      
+      try {
+        // Generate recipe in background (don't set loading state here)
+        await generateRecipeInfo(currentDish.title);
+        console.log('DishScreen: Recipe generation completed in background');
+      } catch (error) {
+        console.error('Error generating recipe in background:', error);
+        // Error will be handled by the Recipe screen's loading state
+      }
     } else {
-      setShowConfirmation(true);
+      // Recipe already exists
+      console.log('DishScreen: Recipe exists, navigation complete');
     }
   };
 
@@ -103,26 +198,22 @@ export default function DishScreen() {
   };
 
   const handleStartFresh = () => {
-    Alert.alert(
-      'Start Fresh?',
-      'This will save your current dish to history and clear all preferences and chat. Are you sure?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Start Fresh', 
-          style: 'destructive',
-          onPress: () => {
-            // Save current dish to history
-            finalizeDish();
-            // Clear preferences, chat messages, and reset
-            clearPreferences();
-            clearConversationContext();
-            clearChatMessages();
-            setCurrentDish(null);
-          }
-        }
-      ]
-    );
+    setShowStartFreshModal(true);
+  };
+
+  const handleConfirmStartFresh = () => {
+    setShowStartFreshModal(false);
+    // Save current dish to history
+    finalizeDish();
+    // Clear preferences, chat messages, and reset
+    clearPreferences();
+    clearConversationContext();
+    clearChatMessages();
+    setCurrentDish(null);
+  };
+
+  const handleCancelStartFresh = () => {
+    setShowStartFreshModal(false);
   };
 
   const handleShareRecipe = async () => {
@@ -150,7 +241,6 @@ export default function DishScreen() {
   if (imageError) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'left', 'right']}>
-        <LoadingSpinner visible={isGeneratingDish || isGeneratingImage} />
         <Header />
         <ErrorScreen
           title="Oops! Something Went Wrong"
@@ -161,11 +251,30 @@ export default function DishScreen() {
     );
   }
 
-  // Empty state
-  if (!currentDish) {
+  // Loading state when generating a dish
+  if (!currentDish && isGeneratingDish) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'left', 'right']}>
-        <LoadingSpinner visible={isGeneratingDish || isGeneratingImage} />
+        <LoadingSpinner visible={true} />
+        <Header />
+        <View style={styles.emptyContainer}>
+          <View style={styles.circleButtonShadow}>
+            <View style={styles.circleButton}>
+              <CustomText style={styles.circleButtonText}>
+                {"Cooking\nup..."}
+              </CustomText>
+            </View>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Empty state - only show if not generating a dish
+  if (!currentDish && !isGeneratingDish) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'left', 'right']}>
+        <LoadingSpinner visible={isGeneratingDish || isGeneratingImage || (currentDish && !imageLoaded)} />
         <Header />
         <View style={styles.emptyContainer}>
           <View style={styles.circleButtonShadow}>
@@ -179,6 +288,15 @@ export default function DishScreen() {
               </CustomText>
             </TouchableOpacity>
           </View>
+          
+          {/* Show current context tags in empty state */}
+          <ContextTags 
+            chatContext={undefined}
+            preferences={preferences}
+            conversationContext={conversationContext}
+            onRemoveContext={handleRemoveContext}
+          />
+          
           <View style={styles.emptySubtitleContainer}>
             <Text style={styles.emptySubtitle}>
               Remix cooking{' '}
@@ -213,7 +331,7 @@ export default function DishScreen() {
     // Content state
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }} edges={['top', 'left', 'right']}>
-      <LoadingSpinner visible={isGeneratingDish || isGeneratingImage} />
+      <LoadingSpinner visible={isGeneratingDish || isGeneratingImage || (currentDish && !imageLoaded)} />
       <Header />
       <View style={styles.mainContainer}>
         <ScrollView 
@@ -226,16 +344,41 @@ export default function DishScreen() {
         >
           {/* Dish Image */}
           <View style={styles.imageCard}>
-            {currentDish.image ? (
+            {currentDish.image && !imageError ? (
               <Image
-                source={{ uri: currentDish.image }}
+                source={{ 
+                  uri: currentDish.image,
+                  cache: 'force-cache' // Enable aggressive caching
+                }}
                 style={styles.dishImage}
                 resizeMode="cover"
+                loadingIndicatorSource={{ uri: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' }} // Transparent placeholder
+                onLoad={() => {
+                  console.log('DishScreen: Image onLoad called for:', currentDish?.title);
+                  console.log('DishScreen: Image URL that loaded:', currentDish?.image);
+                  if (imageError) {
+                    clearImageError();
+                  }
+                  // Mark image as loaded - this will hide the main loading spinner
+                  console.log('DishScreen: Setting imageLoaded=true');
+                  setImageLoaded(true);
+                  // Use requestAnimationFrame to ensure the image is fully rendered before clearing loading state
+                  requestAnimationFrame(() => {
+                    console.log('DishScreen: Calling clearImageGeneration()');
+                    clearImageGeneration(); // Clear the image generation state when image loads
+                  });
+                }}
+                onError={(error) => {
+                  console.log('DishScreen: Image onError called:', error);
+                  console.log('DishScreen: Image URL that failed:', currentDish?.image);
+                  setImageError('Image not available');
+                  setImageLoaded(true); // Clear loading state even if image fails
+                }}
               />
             ) : (
               <View style={[styles.dishImage, styles.imageLoadingContainer]}>
                 <CustomText style={styles.imageLoadingText}>
-                  {isGeneratingDish ? 'Generating your dish...' : 'Loading...'}
+                  {isGeneratingDish || isGeneratingImage ? 'Generating your dish...' : 'Loading image...'}
                 </CustomText>
               </View>
             )}
@@ -265,11 +408,15 @@ export default function DishScreen() {
                 {currentDish.description}
               </CustomText>
               
-              {/* Removed preferences display */}
+              {/* Context Tags */}
+              <ContextTags 
+                chatContext={currentDish.chatContext}
+                preferences={currentDish.preferences}
+                conversationContext={conversationContext}
+                onRemoveContext={handleRemoveContext}
+              />
               
-              <CustomText style={styles.dishHint}>
-                Hit the Cook button to load the full dish info into the recipe tab.
-              </CustomText>
+
             </View>
           </ScrollView>
           {/* Fixed Buttons */}
@@ -319,6 +466,17 @@ export default function DishScreen() {
             </View>
           </View>
         )}
+        
+        {/* Start Fresh Confirmation Modal */}
+        <ConfirmationModal
+          visible={showStartFreshModal}
+          title="Start Fresh?"
+          message="This will save your current dish to history and clear all preferences and chat. Are you sure?"
+          confirmText="Start Fresh"
+          cancelText="Cancel"
+          onConfirm={handleConfirmStartFresh}
+          onCancel={handleCancelStartFresh}
+        />
       </SafeAreaView>
   );
 }

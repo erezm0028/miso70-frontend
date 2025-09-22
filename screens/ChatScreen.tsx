@@ -10,8 +10,10 @@ import { chatWithChef, getChatDishSuggestion, generateImage as generateImageAPI,
 import TypingIndicator from '../components/TypingIndicator';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorScreen from '../components/ErrorScreen';
+import ContextTags from '../components/ContextTags';
 import * as Clipboard from 'expo-clipboard';
 import { Keyboard } from 'react-native';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -76,6 +78,7 @@ export default function ChatScreen() {
     conversationContext,
     updateConversationContext,
     addConversationPreference,
+    removeConversationPreference,
     clearConversationContext,
     isGeneratingDish,
     isGeneratingSpecificDish,
@@ -84,11 +87,16 @@ export default function ChatScreen() {
     updatePreferences,
     finalizeDish,
     clearPreferences,
-    clearChatMessages
+    clearChatMessages,
+    imageError,
+    setImageError,
+    clearImageError,
+    setIsPendingConfirmation
   } = useDish();
   const navigation = useNavigation();
   const [input, setInput] = useState('');
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [showStartFreshModal, setShowStartFreshModal] = useState(false);
   const [pendingSuggestion, setPendingSuggestion] = useState<{
     type: 'dish' | 'dietary' | 'cuisine' | 'plate_style' | 'classic_dish' | 'ingredient' | 'cooking_method' | 'ingredient_preference';
     dishName?: string;
@@ -103,6 +111,7 @@ export default function ChatScreen() {
     completeDish?: any; // Store the complete dish data for new dish suggestions
     userInput?: string; // Store the original user input for clarification
     showViewRecipe?: boolean; // Show view recipe option in confirmation
+    originalUserMessage?: string; // Store the original user message for context
   } | null>(null);
   
   // Track the pending dish for context preservation
@@ -271,11 +280,9 @@ export default function ChatScreen() {
     
     // 1. Dish suggestions - but check if this is a modification request first
     const dishSuggestionPatterns = [
-      /(?:let's|let us) (?:make|create|cook) (?:a |an )?([^!?.]+)/i,
       /(?:how about|what about) (?:a |an )?([^!?.]+)/i,
       /(?:i suggest|i recommend) (?:a |an )?([^!?.]+)/i,
       /(?:want to see|would you like to see) (?:the recipe for )?([^!?.]+)/i,
-      /(?:let's try|let us try) (?:a |an )?([^!?.]+)/i,
     ];
 
     for (const pattern of dishSuggestionPatterns) {
@@ -611,8 +618,7 @@ export default function ChatScreen() {
     const userMessage = input.trim();
     console.log('ChatScreen: handleSend called with:', userMessage);
     
-    // Detect and store ingredient preferences from user message
-    detectAndStoreIngredientPreference(userMessage);
+
     
     setIsWaitingForResponse(true);
     addChatMessage(userMessage, true);
@@ -641,20 +647,34 @@ export default function ChatScreen() {
         // Use the new dish suggestion endpoint
         const suggestionData = await getChatDishSuggestion(userMessage, preferences);
         
-        // Add the chat summary to the conversation
-        addChatMessage(suggestionData.chatSummary, false);
+        console.log('ChatScreen: Backend suggestion data:', suggestionData);
+        console.log('ChatScreen: Has completeDish?', !!suggestionData.completeDish);
+        console.log('ChatScreen: Has chatSummary?', !!suggestionData.chatSummary);
         
-        // Store the pending dish context for future modifications
-        setPendingDishContext(suggestionData.completeDish);
-        
-        // Set up the suggestion with complete dish data
-        setPendingSuggestion({
-          type: 'dish',
-          dishName: suggestionData.completeDish.title,
-          message: `Load "${suggestionData.completeDish.title}" into the app?`,
-          completeDish: suggestionData.completeDish
-        });
-        setShowConfirmation(true);
+        // Check if we have complete dish data
+        if (suggestionData.completeDish) {
+          // Create a proper dish suggestion message using the complete dish data
+          const dishSuggestionMessage = `How about trying "${suggestionData.completeDish.title}"? ${suggestionData.completeDish.description}`;
+          addChatMessage(dishSuggestionMessage, false);
+          // Store the pending dish context for future modifications
+          setPendingDishContext(suggestionData.completeDish);
+          
+          // Store the original user message for later context extraction after dish generation
+          console.log('ChatScreen: Storing original user message for context:', userMessage);
+          
+          // Set up the suggestion with complete dish data and original user message
+          setPendingSuggestion({
+            type: 'dish',
+            dishName: suggestionData.completeDish.title,
+            message: `Load "${suggestionData.completeDish.title}" into the app?`,
+            completeDish: suggestionData.completeDish,
+            originalUserMessage: userMessage // Store the original user message for context
+          });
+          setShowConfirmation(true);
+        } else {
+          console.error('ChatScreen: Backend did not return completeDish data');
+          addChatMessage("I couldn't generate a complete dish suggestion. Please try again.", false);
+        }
       } else if (conversationType === 'recipe_modification') {
         // Handle recipe modifications
         console.log('ChatScreen: Processing recipe modification');
@@ -672,9 +692,9 @@ export default function ChatScreen() {
             console.log('Modification result:', modificationResult); // Debug log
             
             if (modificationResult) {
-              const { isTransformative, summary } = modificationResult;
+              const { isTransformative, summary, updatedDish } = modificationResult;
               
-              console.log('Modification successful:', { isTransformative, summary }); // Debug log
+              console.log('Modification successful:', { isTransformative, summary, updatedDish }); // Debug log
               
               // Add detailed success message to chat with specific changes
               const successMessage = isTransformative 
@@ -683,16 +703,14 @@ export default function ChatScreen() {
               
               addChatMessage(successMessage, false);
               
-              // Add confirmation message as a chat message with specific change context
-              const confirmationMessage = `Your recipe has been updated: ${summary}. Would you like to view the changes or continue chatting?`;
-              addChatMessage(confirmationMessage, false);
-              
-              // Set up the suggestion for the inline buttons
+              // Set up the suggestion like regular dish creation (no View Recipe button)
+              const confirmationMessage = `Load "${updatedDish.title}" into the app?`;
               setPendingSuggestion({
-                type: 'ingredient',
+                type: 'dish',
+                dishName: updatedDish.title,
                 message: confirmationMessage,
-                modification: userMessage,
-                showViewRecipe: true
+                completeDish: updatedDish,
+                originalUserMessage: userMessage
               });
               setShowConfirmation(true);
             } else {
@@ -766,12 +784,14 @@ export default function ChatScreen() {
               console.log('ChatScreen: Updated pendingDishContext with recipe:', updatedRecipe);
               
               // Set up the suggestion for the inline buttons with specific change context
-              const confirmationMessage = `Your recipe has been updated: ${summary}. Would you like to view the changes or continue chatting?`;
+              // Set up the suggestion like regular dish creation (no View Recipe button)
+              const confirmationMessage = `Load "${updatedDish.title}" into the app?`;
               setPendingSuggestion({
-                type: 'ingredient',
+                type: 'dish',
+                dishName: updatedDish.title,
                 message: confirmationMessage,
-                modification: userMessage,
-                showViewRecipe: true
+                completeDish: updatedDish,
+                originalUserMessage: userMessage
               });
               setShowConfirmation(true);
             } else {
@@ -840,7 +860,10 @@ export default function ChatScreen() {
           setShowConfirmation(true);
         }
       } else {
-        // Use regular chat for general conversations
+        // Force all other conversation types to use dish suggestion flow
+        // This ensures we never return full recipes directly in chat
+        console.log('ChatScreen: Forcing dish suggestion flow for conversation type:', conversationType);
+        
         try {
           // Include conversation context for better AI responses
           const conversationSummary = generateConversationSummary();
@@ -848,53 +871,41 @@ export default function ChatScreen() {
             ? `${userMessage} (Context: ${conversationSummary})`
             : userMessage;
           
-          const aiReply = await chatWithChef([
-            ...chatMessages.map(msg => ({
-              role: msg.isUser ? 'user' : 'assistant',
-              content: msg.text
-            })),
-            { role: 'user', content: enhancedUserMessage }
-          ], dishContext);
-          addChatMessage(aiReply, false);
+          // Use the dish suggestion endpoint instead of direct chat
+          const suggestionData = await getChatDishSuggestion(enhancedUserMessage, preferences);
           
-          // Check if the AI response contains any suggestions or changes
-          const suggestion = parseChatResponse(aiReply, userMessage);
-          if (suggestion) {
-            setPendingSuggestion(suggestion);
+          console.log('ChatScreen: Backend suggestion data (else clause):', suggestionData);
+          console.log('ChatScreen: Has completeDish?', !!suggestionData.completeDish);
+          console.log('ChatScreen: Has chatSummary?', !!suggestionData.chatSummary);
+          
+          // Check if we have complete dish data
+          if (suggestionData.completeDish) {
+            // Create a proper dish suggestion message using the complete dish data
+            const dishSuggestionMessage = `How about trying "${suggestionData.completeDish.title}"? ${suggestionData.completeDish.description}`;
+            addChatMessage(dishSuggestionMessage, false);
+            // Store the pending dish context for future modifications
+            setPendingDishContext(suggestionData.completeDish);
+            
+            // Store the original user message for later context extraction after dish generation
+            setPendingSuggestion({
+              type: 'dish',
+              dishName: suggestionData.completeDish.title,
+              message: `Load "${suggestionData.completeDish.title}" into the app?`,
+              completeDish: suggestionData.completeDish,
+              originalUserMessage: userMessage
+            });
             setShowConfirmation(true);
           } else {
-            // If no suggestion was parsed but user asked for a modification, try to detect it
-            const conversationType = detectConversationType(userMessage);
-            if (conversationType === 'recipe_modification' && dishContext) {
-              // User asked for modification but AI didn't suggest anything, create modification suggestion
-              // Only create this if we don't already have a pending suggestion
-              if (!pendingSuggestion) {
-                setPendingSuggestion({
-                  type: 'ingredient',
-                  message: `I can modify your current ${dishContext.title} based on your request. This will update the recipe. Would you like me to apply this change?`,
-                  modification: userMessage
-                });
-                setShowConfirmation(true);
-              }
-            } else if (dishContext && conversationContext.preferences.some(p => p.type === 'ingredient') && !pendingSuggestion) {
-              // User mentioned ingredients and has a current dish - suggest modification
-              // Only create this if we don't already have a pending suggestion
-              const ingredientPrefs = conversationContext.preferences
-                .filter(p => p.type === 'ingredient')
-                .map(p => p.value);
-              
-              setPendingSuggestion({
-                type: 'ingredient',
-                message: `I can add ${ingredientPrefs.join(', ')} to your current ${dishContext.title}. This will update the recipe. Would you like me to apply this change?`,
-                modification: `Add ${ingredientPrefs.join(', ')} to the dish`
-              });
-              setShowConfirmation(true);
-            }
+            console.error('ChatScreen: Backend did not return completeDish data (else clause)');
+            addChatMessage("I couldn't generate a complete dish suggestion. Please try again.", false);
           }
-        } catch (chatError) {
-          setError('We couldn\'t connect to the chat service. Please check your connection and try again.');
+        } catch (error) {
+          console.error('ChatScreen: Error in dish suggestion flow:', error);
+          addChatMessage("I'm having trouble processing your request. Please try again.", false);
         }
       }
+      
+      // Old logic removed - all conversation types now use dish suggestion flow
     } catch (err) {
       setError('Something went wrong. Please try again.');
     }
@@ -907,13 +918,17 @@ export default function ChatScreen() {
       setShowConfirmation(false);
       setPendingSuggestion(null);
       
+      // Clear pending confirmation to allow auto-generation
+      setIsPendingConfirmation(false);
+      console.log('ChatScreen: Set isPendingConfirmation=false to allow auto-generation');
+      
       // Clear pending dish context when confirming a dish
       if (pendingSuggestion.type === 'dish') {
         setPendingDishContext(null);
       }
       
       // Show loading message for dish loading
-      if (pendingSuggestion.type === 'dish' && !pendingSuggestion.showViewRecipe) {
+      if (pendingSuggestion.type === 'dish') {
         setIsLoadingDish(true);
         addChatMessage("Loading dish into the app...", false);
       } else {
@@ -926,21 +941,9 @@ export default function ChatScreen() {
           if (pendingSuggestion.completeDish) {
             // We have complete dish data, create the dish directly
             const completeDish = pendingSuggestion.completeDish;
-            let imageUrl = 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=800&q=80'; // fallback
-            try {
-              imageUrl = await generateImageAPI(`${completeDish.title}. ${completeDish.description}`);
-            } catch (imgErr) {
-              console.warn('Image generation failed:', imgErr);
-            }
-            // Preload the image before setting the dish and navigating
-            try {
-              await Image.prefetch(imageUrl);
-            } catch (e) {
-              // If prefetch fails, continue anyway
-            }
             const newDish = {
               id: Date.now().toString(),
-              image: imageUrl,
+              image: '', // Will be generated when dish is loaded
               title: completeDish.title,
               description: completeDish.description,
               recipe: {
@@ -951,9 +954,135 @@ export default function ChatScreen() {
               },
               timestamp: new Date(),
             };
+            console.log('ChatScreen: Created new dish with image URL:', newDish.image);
+            console.log('ChatScreen: Full dish object:', newDish);
             setCurrentDish(newDish);
             setDishHistory(prev => [newDish, ...prev]);
             trackDishInHistory(newDish); // Track in conversation history
+            
+            // Extract and add context from the original user message AFTER dish is created
+            if (pendingSuggestion.originalUserMessage) {
+              console.log('ChatScreen: Extracting context from original message after dish creation:', pendingSuggestion.originalUserMessage);
+              // Preprocess text to handle contractions like "let's" -> "lets"
+              const preprocessedText = pendingSuggestion.originalUserMessage.toLowerCase()
+                .replace(/let's/g, 'lets')
+                .replace(/don't/g, 'dont')
+                .replace(/can't/g, 'cant')
+                .replace(/won't/g, 'wont')
+                .replace(/it's/g, 'its')
+                .replace(/that's/g, 'thats')
+                .replace(/what's/g, 'whats')
+                .replace(/how's/g, 'hows')
+                .replace(/where's/g, 'wheres')
+                .replace(/when's/g, 'whens')
+                .replace(/why's/g, 'whys')
+                .replace(/who's/g, 'whos');
+              const words = preprocessedText.split(/\s+/);
+              console.log('ChatScreen: All words from original message:', words);
+              // Create a comprehensive list of known food ingredients and terms
+              const knownFoodItems = [
+                // Proteins
+                'beef', 'pork', 'chicken', 'turkey', 'lamb', 'duck', 'fish', 'salmon', 'tuna', 'shrimp', 'crab', 'lobster', 'scallops', 'mussels', 'clams', 'oysters', 'tofu', 'tempeh', 'seitan', 'eggs',
+                // Vegetables
+                'tomato', 'tomatoes', 'onion', 'onions', 'garlic', 'ginger', 'carrot', 'carrots', 'celery', 'bell pepper', 'peppers', 'mushrooms', 'mushroom', 'spinach', 'kale', 'lettuce', 'cabbage', 'broccoli', 'cauliflower', 'zucchini', 'eggplant', 'potato', 'potatoes', 'sweet potato', 'corn', 'peas', 'beans', 'lentils', 'chickpeas', 'avocado', 'cucumber', 'radish',
+                // Fruits
+                'apple', 'apples', 'banana', 'bananas', 'orange', 'oranges', 'lemon', 'lemons', 'lime', 'limes', 'mango', 'mangoes', 'pineapple', 'strawberry', 'strawberries', 'blueberry', 'blueberries', 'raspberry', 'raspberries', 'blackberry', 'blackberries', 'cherry', 'cherries', 'grape', 'grapes', 'peach', 'peaches', 'pear', 'pears',
+                // Dairy
+                'cheese', 'cheddar', 'mozzarella', 'parmesan', 'brie', 'camembert', 'goat cheese', 'feta', 'ricotta', 'cream cheese', 'butter', 'milk', 'cream', 'yogurt', 'sour cream',
+                // Grains & Carbs
+                'rice', 'pasta', 'noodles', 'bread', 'quinoa', 'barley', 'oats', 'wheat', 'flour', 'tortilla', 'tortillas', 'baguette', 'bagel', 'croissant',
+                // Herbs & Spices
+                'basil', 'oregano', 'thyme', 'rosemary', 'sage', 'parsley', 'cilantro', 'mint', 'dill', 'chives', 'paprika', 'cumin', 'turmeric', 'cinnamon', 'nutmeg', 'cardamom', 'coriander', 'fennel', 'anise',
+                // Nuts & Seeds
+                'almond', 'almonds', 'walnut', 'walnuts', 'pecan', 'pecans', 'cashew', 'cashews', 'pistachio', 'pistachios', 'peanut', 'peanuts', 'sunflower seeds', 'pumpkin seeds', 'sesame', 'tahini',
+                // Condiments & Sauces
+                'olive oil', 'coconut oil', 'vinegar', 'balsamic', 'soy sauce', 'fish sauce', 'hot sauce', 'sriracha', 'mustard', 'ketchup', 'mayo', 'mayonnaise', 'pesto', 'salsa', 'hummus',
+                // Other
+                'honey', 'maple syrup', 'sugar', 'salt', 'pepper', 'vanilla', 'chocolate', 'cocoa', 'coconut', 'wine', 'beer', 'stock', 'broth'
+              ];
+              
+              // Detect if this is a modification request
+              const isModification = /\b(replace|change|swap|substitute|instead of|with)\b/i.test(userMessage);
+              
+              let meaningfulWords = words.filter(word => {
+                const lowerWord = word.toLowerCase();
+                // Only include words that are known food items and longer than 2 characters
+                return word.length > 2 && knownFoodItems.includes(lowerWord);
+              });
+              
+              // For modifications, remove the old ingredient being replaced
+              if (isModification) {
+                console.log('ChatScreen: Detected modification, filtering out old ingredients');
+                
+                // Common modification patterns to identify old vs new ingredients
+                const modificationPatterns = [
+                  /replace\s+(?:the\s+)?(\w+)\s+with\s+(\w+)/i,
+                  /change\s+(?:the\s+)?(\w+)\s+to\s+(\w+)/i, 
+                  /swap\s+(?:the\s+)?(\w+)\s+for\s+(\w+)/i,
+                  /substitute\s+(?:the\s+)?(\w+)\s+with\s+(\w+)/i,
+                  /(\w+)\s+instead\s+of\s+(?:the\s+)?(\w+)/i, // new instead of old
+                  /use\s+(\w+)\s+instead\s+of\s+(?:the\s+)?(\w+)/i, // new instead of old
+                  /only\s+with\s+(\w+)\s+instead\s+of\s+(?:the\s+)?(\w+)/i, // new instead of old
+                  /(?:make\s+)?(?:this\s+)?(?:dish\s+)?only\s+with\s+(\w+)/i // only with new ingredient
+                ];
+                
+                let oldIngredients = [];
+                let newIngredients = [];
+                
+                for (const pattern of modificationPatterns) {
+                  const match = userMessage.match(pattern);
+                  if (match) {
+                    if (pattern.source.includes('instead of')) {
+                      // For "instead of" patterns, the order is reversed
+                      newIngredients.push(match[1].toLowerCase());
+                      oldIngredients.push(match[2].toLowerCase());
+                    } else {
+                      // For other patterns, first capture is old, second is new
+                      oldIngredients.push(match[1].toLowerCase());
+                      newIngredients.push(match[2].toLowerCase());
+                    }
+                    break;
+                  }
+                }
+                
+                console.log('ChatScreen: Detected old ingredients to remove:', oldIngredients);
+                console.log('ChatScreen: Detected new ingredients to keep:', newIngredients);
+                
+                // Filter out old ingredients, keep new ones
+                meaningfulWords = meaningfulWords.filter(word => {
+                  const lowerWord = word.toLowerCase();
+                  return !oldIngredients.includes(lowerWord);
+                });
+                
+                console.log('ChatScreen: Filtered meaningful words after removing old ingredients:', meaningfulWords);
+              }
+              
+              console.log('ChatScreen: Final meaningful words for context:', meaningfulWords);
+              
+              // Clear existing userWord context and add all meaningful words at once
+              const existingContext = conversationContext.preferences.filter(pref => pref.type !== 'userWord');
+              const userWordContexts = meaningfulWords.map(word => {
+                let displayWord = word;
+                if (word === 'tamales') displayWord = 'tamale';
+                if (word === 'tomatoes') displayWord = 'tomato';
+                if (word === 'cheeses') displayWord = 'cheese';
+                if (word === 'pizzas') displayWord = 'pizza';
+                if (word === 'soups') displayWord = 'soup';
+                
+                return {
+                  type: 'userWord' as const,
+                  value: displayWord,
+                  timestamp: new Date()
+                };
+              });
+              
+              const finalContext = [...existingContext, ...userWordContexts];
+              console.log('ChatScreen: Final context after dish creation:', finalContext);
+              updateConversationContext({
+                preferences: finalContext
+              });
+            }
+            
             setReadyToNavigate(true);
             setIsConfirmingDish(false);
             setIsLoadingDish(false); // Clear loading state when dish is loaded
@@ -966,9 +1095,9 @@ export default function ChatScreen() {
               await generateSpecificDish(pendingSuggestion.dishName, pendingSuggestion.modification, preferences);
             } else {
               // User asked for a specific dish without modifications
-              const aiMessage = chatMessages.find(msg => !msg.isUser && msg.text.includes(pendingSuggestion.dishName));
-              const chatContext = aiMessage ? aiMessage.text : undefined;
-              console.log('ChatScreen: Generating specific dish with chat context and preferences:', preferences);
+              // Use the stored original user message as chat context
+              const chatContext = pendingSuggestion.originalUserMessage || undefined;
+              console.log('ChatScreen: Generating specific dish with original user message as context:', chatContext);
               await generateSpecificDish(pendingSuggestion.dishName, chatContext, preferences);
             }
             setIsConfirmingDish(false);
@@ -1172,28 +1301,13 @@ export default function ChatScreen() {
             
             console.log('ChatScreen: View Recipe - dishContext:', dishContext?.title);
             console.log('ChatScreen: View Recipe - dishContext.recipe:', dishContext?.recipe);
+            console.log('ChatScreen: View Recipe - dishContext.image:', dishContext?.image ? 'Has image' : 'No image');
             
             if (dishContext) {
               // Create a new dish from the modified context
-              let imageUrl = dishContext.image || 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=800&q=80';
-              
-              // Generate new image for the modified dish
-              try {
-                imageUrl = await generateImageAPI(`${dishContext.title}. ${dishContext.description}`);
-              } catch (imgErr) {
-                console.warn('Image generation failed:', imgErr);
-              }
-              
-              // Preload the image before setting the dish and navigating
-              try {
-                await Image.prefetch(imageUrl);
-              } catch (e) {
-                // If prefetch fails, continue anyway
-              }
-              
               const newDish = {
                 id: Date.now().toString(),
-                image: imageUrl,
+                image: dishContext.image || dishContext.newImageUrl || '', // Preserve existing image from modification
                 title: dishContext.title,
                 description: dishContext.description,
                 recipe: dishContext.recipe || {
@@ -1214,6 +1328,8 @@ export default function ChatScreen() {
               };
               
               console.log('ChatScreen: View Recipe - newDish.recipe:', newDish.recipe);
+              console.log('ChatScreen: View Recipe - newDish.image:', newDish.image ? 'Has image' : 'No image');
+              console.log('ChatScreen: View Recipe - newDish.image URL:', newDish.image);
               
               setCurrentDish(newDish);
               setDishHistory(prev => [newDish, ...prev]);
@@ -1256,13 +1372,20 @@ export default function ChatScreen() {
                     recipe: updatedDish?.recipe || dishContext.recipe
                   });
                   
-                  // Set up the suggestion for the inline buttons with specific change context
-                  const confirmationMessage = `Your recipe has been updated: ${summary}. Would you like to view the changes or continue chatting?`;
+                  // Set up the suggestion like regular dish creation (no View Recipe button)
+                  const confirmationMessage = `Load "${updatedDish?.title || dishContext.title}" into the app?`;
                   setPendingSuggestion({
-                    type: 'ingredient',
+                    type: 'dish',
+                    dishName: updatedDish?.title || dishContext.title,
                     message: confirmationMessage,
-                    modification: pendingSuggestion.modification,
-                    showViewRecipe: true
+                    completeDish: {
+                      ...dishContext,
+                      title: updatedDish?.title || dishContext.title,
+                      description: updatedDish?.description || dishContext.description,
+                      image: updatedDish?.image || dishContext.image,
+                      recipe: updatedDish?.recipe || dishContext.recipe
+                    },
+                    originalUserMessage: pendingSuggestion.modification
                   });
                   setShowConfirmation(true);
                 } else {
@@ -1320,6 +1443,10 @@ export default function ChatScreen() {
     setShowConfirmation(false);
     setPendingSuggestion(null);
     setPendingDishContext(null); // Clear pending dish context on rejection
+    
+    // Clear pending confirmation to restore normal state
+    setIsPendingConfirmation(false);
+    console.log('ChatScreen: Set isPendingConfirmation=false after rejection');
   };
 
   const handleRetry = () => {
@@ -1335,30 +1462,26 @@ export default function ChatScreen() {
   };
 
   const handleStartFresh = () => {
-    Alert.alert(
-      'Start Fresh?',
-      'This will save your current work to history and clear all preferences and chat. Are you sure?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Start Fresh', 
-          style: 'destructive',
-          onPress: () => {
-            // Save current dish to history if it exists
-            if (currentDish) {
-              finalizeDish();
-            }
-            // Clear preferences, chat messages, and reset
-            clearPreferences();
-            clearChatMessages();
-            clearConversationContext();
-            setInput('');
-            setCurrentDish(null);
-            setPendingDishContext(null); // Clear pending dish context
-          }
-        }
-      ]
-    );
+    setShowStartFreshModal(true);
+  };
+
+  const handleConfirmStartFresh = () => {
+    setShowStartFreshModal(false);
+    // Save current dish to history if it exists
+    if (currentDish) {
+      finalizeDish();
+    }
+    // Clear preferences, chat messages, and reset
+    clearPreferences();
+    clearChatMessages();
+    clearConversationContext();
+    setInput('');
+    setCurrentDish(null);
+    setPendingDishContext(null); // Clear pending dish context
+  };
+
+  const handleCancelStartFresh = () => {
+    setShowStartFreshModal(false);
   };
 
 
@@ -1366,9 +1489,10 @@ export default function ChatScreen() {
   const handleCopyMessage = async (text: string) => {
     try {
       await Clipboard.setStringAsync(text);
-      Alert.alert('Copied!', 'Message copied to clipboard');
+      // Text copied silently without system popup
     } catch (error) {
-      Alert.alert('Error', 'Failed to copy message');
+      // Silent error handling - could add a toast notification here if needed
+      console.error('Failed to copy message:', error);
     }
   };
 
@@ -1587,7 +1711,7 @@ export default function ChatScreen() {
       'without', 'with less', 'with more', 'extra', 'additional',
       'spicy', 'mild', 'sweet', 'savory', 'creamy', 'crunchy',
       'italian style', 'mexican style', 'asian style', 'indian style', 'mediterranean style',
-      'style', 'flavor', 'taste',
+      'flavor', 'taste',
       // Add specific modification phrases
       'use my', 'use the', 'add my', 'add the', 'include my', 'include the',
       'put my', 'put the', 'add to this', 'add to the current', 'use in this', 'use in the current',
@@ -1601,38 +1725,41 @@ export default function ChatScreen() {
     }
     
     // Remix/transform keywords (creative transformations)
+    // Only include specific phrases that clearly indicate transformations
     const remixKeywords = [
       'make it a', 'turn this into', 'transform', 'remix', 'remake',
-      'dessert', 'breakfast', 'lunch', 'dinner', 'appetizer', 'snack',
-      'salad', 'soup', 'pasta', 'pizza', 'taco', 'bowl', 'wrap',
-      'italian', 'mexican', 'asian', 'indian', 'mediterranean',
-      'comfort food', 'healthy', 'gourmet', 'simple', 'fancy'
+      'make this a', 'convert this to', 'change this to',
+      // Only include specific transformation phrases, not generic food words
     ];
     
     // Check for remix/transform requests (creative transformations)
-    if (remixKeywords.some(keyword => lowerMessage.includes(keyword))) {
+    const matchingRemixKeywords = remixKeywords.filter(keyword => lowerMessage.includes(keyword));
+    if (matchingRemixKeywords.length > 0) {
+      console.log('ChatScreen: Remix keywords matched:', matchingRemixKeywords);
+      console.log('ChatScreen: Message:', lowerMessage);
       return 'remix_transform';
     }
     
     // Recipe-related keywords (for new dish requests) - CHECK THESE LAST
+    // Only include specific phrases that clearly indicate recipe requests
     const recipeKeywords = [
-      'recipe', 'cook', 'dish', 'food', 'meal', 'ingredient', 'kitchen',
-      'cooking', 'chef', 'cuisine', 'flavor', 'taste', 'spice', 'seasoning',
-      'what can i make', 'what should i cook', 'what should i make',
       'give me a recipe', 'suggest a dish', 'recommend a dish',
-      'i need a', 'i want to make', 'i want to cook',
-      'show me a', 'tell me about', 'what about',
-      'new idea', 'new recipe', 'new dish',
+      'i need a recipe', 'i want a recipe', 'show me a recipe',
+      'what can i make', 'what should i cook', 'what should i make',
+      'new recipe', 'new dish', 'recipe for',
       'quick dinner', 'easy dinner', 'simple dinner',
       'lunch idea', 'breakfast idea', 'dinner idea',
-      'with chicken', 'with vegetables', 'with pasta', 'with rice',
-      'let\'s make', 'let us make', 'make me', 'cook me',
+      'make me', 'cook me',
+      // Specific dish names that clearly indicate recipe requests
       'carbonara', 'pizza', 'risotto', 'sushi', 'ramen', 'taco', 'curry',
-      'pasta', 'lasagna', 'enchiladas', 'pad thai', 'biryani'
+      'lasagna', 'enchiladas', 'pad thai', 'biryani'
     ];
     
     // Check for recipe requests LAST (new dishes)
-    if (recipeKeywords.some(keyword => lowerMessage.includes(keyword))) {
+    const matchingKeywords = recipeKeywords.filter(keyword => lowerMessage.includes(keyword));
+    if (matchingKeywords.length > 0) {
+      console.log('ChatScreen: Recipe keywords matched:', matchingKeywords);
+      console.log('ChatScreen: Message:', lowerMessage);
       return 'recipe_request';
     }
     
@@ -1702,14 +1829,17 @@ export default function ChatScreen() {
   }, [navigation, typingTimeout]);
 
   // Show error screen if there's an error
-  if (error) {
+  if (error || imageError) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
         <Header />
         <ErrorScreen
           title="Oops! Something Went Wrong"
-          message={error}
-          onRetry={handleRetry}
+          message={error || imageError || 'Unknown error occurred'}
+          onRetry={() => {
+            clearImageError();
+            if (error) handleRetry();
+          }}
         />
       </SafeAreaView>
     );
@@ -1753,8 +1883,6 @@ export default function ChatScreen() {
                     Ask me for a recipe. Or toss in your fridge contents. Let's build a dish.
                   </CustomText>
                   
-                  {/* Removed preferences display */}
-                  
                   <View style={styles.suggestedContainer}>
                     {suggestedQuestions.map((q, i) => (
                       <TouchableOpacity
@@ -1765,6 +1893,19 @@ export default function ChatScreen() {
                         <CustomText style={styles.suggestedText}>"{q}"</CustomText>
                       </TouchableOpacity>
                     ))}
+                    
+                    {/* Context Tags - positioned below examples, near Start Fresh */}
+                    {!showConfirmation && (
+                      <ContextTags 
+                        chatContext={currentDish?.chatContext}
+                        preferences={currentDish?.preferences}
+                        conversationContext={conversationContext}
+                        onRemoveContext={(type, value) => {
+                          console.log('ChatScreen: Removing context:', type, value);
+                          removeConversationPreference(type, value);
+                        }}
+                      />
+                    )}
                     
                     {/* Action buttons for clear */}
                     <View style={styles.actionButtonsContainer}>
@@ -1907,6 +2048,21 @@ export default function ChatScreen() {
               
             </ScrollView>
             
+            {/* Context Tags for non-empty chat - OUTSIDE ScrollView */}
+            {!chatEmpty && !showConfirmation && (
+              <View style={styles.contextTagsContainer}>
+                <ContextTags 
+                  chatContext={currentDish?.chatContext}
+                  preferences={currentDish?.preferences}
+                  conversationContext={conversationContext}
+                  onRemoveContext={(type, value) => {
+                    console.log('ChatScreen: Removing context:', type, value);
+                    removeConversationPreference(type, value);
+                  }}
+                />
+              </View>
+            )}
+            
             {/* Start Fresh button for non-empty chat - OUTSIDE ScrollView */}
             {!chatEmpty && (
               <View style={styles.startFreshContainer}>
@@ -1951,6 +2107,17 @@ export default function ChatScreen() {
             </Animated.View>
           </View>
         </KeyboardAvoidingView>
+        
+        {/* Start Fresh Confirmation Modal */}
+        <ConfirmationModal
+          visible={showStartFreshModal}
+          title="Start Fresh?"
+          message="This will save your current work to history and clear all preferences and chat. Are you sure?"
+          confirmText="Start Fresh"
+          cancelText="Cancel"
+          onConfirm={handleConfirmStartFresh}
+          onCancel={handleCancelStartFresh}
+        />
       </SafeAreaView>
     </>
   );
@@ -2312,5 +2479,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 20,
     marginBottom: 10,
+  },
+  contextTagsContainer: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    alignItems: 'center',
   },
 });

@@ -12,6 +12,7 @@ import { getRecipeInfo, generateShareText } from '../src/api';
 import { Share } from 'react-native';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorScreen from '../components/ErrorScreen';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 
 const Accordion = ({ title, children, defaultOpen = false }) => {
@@ -29,7 +30,7 @@ const Accordion = ({ title, children, defaultOpen = false }) => {
 };
 
 export default function RecipesScreen() {
-  const { currentDish, generateDish, generateRecipeInfo, setCurrentDish, preferences, finalizeDish, clearPreferences, clearConversationContext, clearChatMessages } = useDish();
+  const { currentDish, generateDish, generateRecipeInfo, setCurrentDish, preferences, finalizeDish, clearPreferences, clearConversationContext, clearChatMessages, isGeneratingDish, isGeneratingImage, isGeneratingRecipe } = useDish();
   const navigation = useNavigation();
 
   // If there is a current dish but no recipe, treat as pending
@@ -61,6 +62,7 @@ export default function RecipesScreen() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showStartFreshModal, setShowStartFreshModal] = useState(false);
 
   // Use these for rendering, always as arrays
   const ingredients =
@@ -127,8 +129,7 @@ export default function RecipesScreen() {
     setLoading(true);
     setError(null);
     try {
-      // Small delay to ensure preferences are updated from other screens
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // No delay - preferences are already updated
       
       // Generate a random dish with current preferences
       console.log('RecipesScreen: Generating random dish with preferences:', preferences);
@@ -168,30 +169,43 @@ export default function RecipesScreen() {
   };
 
   const handleStartFresh = () => {
-    Alert.alert(
-      'Start Fresh?',
-      'This will save your current dish to history and clear all preferences and chat. Are you sure?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Start Fresh', 
-          style: 'destructive',
-          onPress: () => {
-            // Save current dish to history
-            finalizeDish();
-            // Clear preferences, chat messages, and reset
-            clearPreferences();
-            clearConversationContext();
-            clearChatMessages();
-            setCurrentDish(null);
-          }
-        }
-      ]
-    );
+    setShowStartFreshModal(true);
   };
 
-  if (loading) {
-    return <LoadingSpinner visible={true} />;
+  const handleConfirmStartFresh = () => {
+    setShowStartFreshModal(false);
+    // Save current dish to history
+    finalizeDish();
+    // Clear preferences, chat messages, and reset
+    clearPreferences();
+    clearConversationContext();
+    clearChatMessages();
+    setCurrentDish(null);
+  };
+
+  const handleCancelStartFresh = () => {
+    setShowStartFreshModal(false);
+  };
+
+  // Show loading spinner when generating dish or recipe
+  if (loading || isGeneratingDish || isGeneratingImage || isGeneratingRecipe) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+        <Header />
+        <LoadingSpinner visible={true} />
+        <View style={styles.loadingContainer}>
+          <View style={styles.iconCircle}>
+            <FontAwesome5 name="utensils" size={56} color="#67756a" />
+          </View>
+          <CustomText style={styles.emptyTitle}>
+            {isGeneratingDish ? 'Cooking up your dish...' : isGeneratingRecipe ? 'Generating recipe...' : 'Loading recipe...'}
+          </CustomText>
+          <CustomText style={styles.emptySubtitle}>
+            Please wait while we prepare your recipe with all the details.
+          </CustomText>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   if (error) {
@@ -457,7 +471,7 @@ export default function RecipesScreen() {
           <View style={styles.recipeIllustrationContainer}>
             <View style={styles.illustrationCircle}>
               <View style={styles.ramenIconContainer}>
-                <FontAwesome5 name="utensils" size={60} color="#d46e57" />
+                <FontAwesome5 name="hamburger" size={60} color="#d46e57" />
                 <FontAwesome name="arrow-up" size={30} color="#d46e57" style={styles.arrowOverlay} />
               </View>
             </View>
@@ -468,12 +482,29 @@ export default function RecipesScreen() {
           </View>
         )}
       </ScrollView>
+      
+      {/* Start Fresh Confirmation Modal */}
+      <ConfirmationModal
+        visible={showStartFreshModal}
+        title="Start Fresh?"
+        message="This will save your current dish to history and clear all preferences and chat. Are you sure?"
+        confirmText="Start Fresh"
+        cancelText="Cancel"
+        onConfirm={handleConfirmStartFresh}
+        onCancel={handleCancelStartFresh}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
   emptyState: {
     flex: 1,
     alignItems: 'center',
