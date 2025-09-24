@@ -2,7 +2,7 @@
 const getBaseUrl = () => {
   // For local development, use HTTP with port 3001
  //return 'https://miso70-backend.onrender.com'; 
- return 'http://192.168.1.78:3001';
+ return 'http://10.100.102.8:3001';
 };
 
 const BASE_URL = getBaseUrl();
